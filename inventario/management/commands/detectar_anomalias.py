@@ -1,0 +1,71 @@
+"""Comando de gestión: corre los detectores de anomalías de control de
+existencias (diferencias de inventario y movimientos atípicos) y guarda los
+resultados como registros Anomalia."""
+from django.core.management.base import BaseCommand
+from django.db import transaction
+
+from inventario.ml.anomalias import detectar_diferencias_inventario, detectar_movimientos_atipicos
+from inventario.models import Anomalia, Movimiento, Producto
+
+
+class Command(BaseCommand):
+    help = (
+        'Corre los detectores de anomalías de control de existencias '
+        '(diferencias de inventario sobre ConteoDetalle y movimientos '
+        'atípicos sobre Movimiento) y guarda los resultados como registros '
+        'Anomalia, sin revisar.'
+    )
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--origen', default=None,
+            help='Filtra los conteos y movimientos usados por origen (prueba/real).',
+        )
+
+    def handle(self, *args, **options):
+        origen = options['origen']
+
+        hallazgos_diferencias = detectar_diferencias_inventario(origen=origen)
+        hallazgos_movimientos, sin_historico = detectar_movimientos_atipicos(origen=origen)
+        hallazgos = hallazgos_diferencias + hallazgos_movimientos
+
+        with transaction.atomic():
+            for hallazgo in hallazgos:
+                Anomalia.objects.create(
+                    producto_id=hallazgo.producto_id,
+                    fecha_deteccion=hallazgo.fecha_deteccion,
+                    tipo=hallazgo.tipo,
+                    severidad=hallazgo.severidad,
+                    score=hallazgo.score,
+                    valor_observado=hallazgo.valor_observado,
+                    valor_esperado=hallazgo.valor_esperado,
+                    descripcion=hallazgo.descripcion,
+                )
+
+        self.stdout.write(self.style.SUCCESS(f'\nAnomalías detectadas: {len(hallazgos)}'))
+        self.stdout.write(f'  Diferencias de inventario: {len(hallazgos_diferencias)}')
+        self.stdout.write(f'  Movimientos atípicos:      {len(hallazgos_movimientos)}')
+
+        self.stdout.write('\nPor severidad:')
+        for severidad, etiqueta in Anomalia.Severidad.choices:
+            n = sum(1 for h in hallazgos if h.severidad == severidad)
+            self.stdout.write(f'  {etiqueta}: {n}')
+
+        if sin_historico:
+            self.stdout.write(self.style.WARNING(
+                f'\nProductos sin histórico suficiente para el z-score ({len(sin_historico)}):'
+            ))
+            productos_por_id = {
+                p.pk: p for p in Producto.objects.filter(pk__in=[pid for pid, _, _ in sin_historico])
+            }
+            etiquetas_tipo = dict(Movimiento.Tipo.choices)
+            for producto_id, tipo, n_movimientos in sin_historico:
+                producto = productos_por_id.get(producto_id)
+                nombre = f'{producto.codigo} — {producto.nombre}' if producto else f'producto #{producto_id}'
+                self.stdout.write(
+                    f'  {nombre} ({etiquetas_tipo[tipo]}): {n_movimientos} movimiento(s), se necesitan '
+                    f'al menos 5.'
+                )
+
+        for hallazgo in sorted(hallazgos, key=lambda h: h.score, reverse=True):
+            self.stdout.write(f'\n  [{hallazgo.severidad.upper()}] {hallazgo.descripcion}')

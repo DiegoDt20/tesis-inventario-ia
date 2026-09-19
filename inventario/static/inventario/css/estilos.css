@@ -1,0 +1,1195 @@
+/*
+ * Sistema de diseño propio — "consola de control de pigmento".
+ *
+ * Dirección: el negocio es una ferretería/distribuidora de pinturas en Lima,
+ * y el sistema lee en vivo tres indicadores y un motor de predicción de
+ * demanda con IA. La referencia visual dejó de ser la ficha de papel y pasó
+ * a ser el instrumento de taller: el panel de control de una máquina
+ * tintométrica, la lectura de un instrumento de laboratorio — vidrio oscuro,
+ * bordes iluminados por el borde en vez de sombra gris, cifras en formato de
+ * lectura digital. Lo usan dos personas muy distintas: el dueño, que entra
+ * una o dos veces al día a leer el panel y decidir qué comprar (lectura
+ * rápida, jerarquía clara), y el operador de mostrador, que registra
+ * pedidos y conteos con prisa (objetivos de toque grandes, formularios que
+ * no exigen precisión de mouse) — eso no cambió.
+ *
+ * De la dirección nueva:
+ *   - Fondo de tinta oscura (con matiz verde-grafito, no negro puro) en TODA
+ *     la interfaz, no solo en la barra lateral. Una retícula de puntos muy
+ *     tenue de fondo evoca el papel cuadriculado de un instrumento, no un
+ *     degradado decorativo.
+ *   - Tarjetas de vidrio: superficie translúcida con desenfoque, borde de1px
+ *     y un leve brillo interior superior. La jerarquía se lee por el borde
+ *     y el resplandor, nunca por una sombra gris genérica.
+ *   - Los mismos tres colores de pigmento (ámbar, brasa, turquesa) siguen
+ *     cargando TODO el significado de estado — ahora en versión luminosa
+ *     para leerse sobre fondo oscuro. Turquesa hace doble función como
+ *     acento de interacción y como pigmento "va bien" (petróleo), igual que
+ *     antes: un mismo tono para un mismo significado en todo el sistema.
+ *   - Las cifras de los indicadores (el primer vistazo del dueño) se leen en
+ *     IBM Plex Mono tabular con un resplandor sutil — como el visor de un
+ *     instrumento digital — en vez de un número display gigante.
+ *   - Un solo gesto de movimiento en toda la interfaz: un barrido de brillo
+ *     lento sobre el panel de resumen del dashboard. Todo lo demás está
+ *     quieto.
+ *
+ * Se carga DESPUÉS de bootstrap.min.css y bootstrap-icons.min.css: Bootstrap
+ * aporta la grilla, los formularios base y el comportamiento con JS
+ * (offcanvas, collapse); este archivo redefine su apariencia casi por
+ * completo mediante las variables CSS que Bootstrap 5.3 expone, en vez de
+ * recompilarlo o pelear contra sus estilos.
+ */
+
+:root {
+    /* Tinta: fondo de página y superficies oscuras. Verde-grafito, no negro
+       puro — es la identidad de marca del sistema, ahora llevada a toda la
+       interfaz en vez de solo la barra lateral. */
+    --ink: #10140f;
+    --ink-700: #1a2018;
+    --ink-soft: rgba(233, 238, 231, 0.58);
+
+    /* Texto sobre fondo oscuro. */
+    --texto: #eef1ec;
+    --etiqueta: rgba(233, 238, 231, 0.85);
+
+    /* Superficies: vidrio (tarjetas, paneles) y hueco (rieles, chips,
+       zócalos recesados). */
+    --superficie: #1b2320;
+    --superficie-rgb: 27, 35, 32;
+    --superficie-hundida: #171d19;
+    --linea: rgba(255, 255, 255, 0.09);
+    --linea-fuerte: rgba(255, 255, 255, 0.20);
+
+    /* Acento único para interacción (enlaces, botón de confirmación, foco,
+       navegación activa). Es el mismo tono que el pigmento petróleo: "va
+       bien" se lee igual en todo el sistema. */
+    --acento: #29e5c4;
+    --acento-rgb: 41, 229, 196;
+    --acento-oscuro: #0f9484;
+    --acento-claro: rgba(41, 229, 196, 0.13);
+    --glow-acento: 0 0 26px rgba(41, 229, 196, 0.28);
+
+    /* Pigmentos: mismo trío en tarjetas KPI, badges de estado, barras
+       apiladas y gráficos — versión luminosa para leerse sobre vidrio
+       oscuro. Ámbar = atención/EI, brasa = riesgo/COI, turquesa =
+       servicio/éxito. Pizarra es el cuarto tono neutro, para series que no
+       son ni buenas ni malas. */
+    --pigmento-ocre: #f0b23e;
+    --pigmento-ocre-rgb: 240, 178, 62;
+    --pigmento-oxido: #ff6b4a;
+    --pigmento-oxido-rgb: 255, 107, 74;
+    --pigmento-petroleo: #29e5c4;
+    --pigmento-petroleo-rgb: 41, 229, 196;
+    --pigmento-pizarra: #8fa6ba;
+    --pigmento-pizarra-rgb: 143, 166, 186;
+
+    --fuente-display: 'Archivo', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    --fuente-base: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    --fuente-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+    --espacio-1: 0.25rem;
+    --espacio-2: 0.5rem;
+    --espacio-3: 1rem;
+    --espacio-4: 1.5rem;
+    --espacio-5: 2rem;
+    --espacio-6: 3rem;
+
+    --radio-borde: 0.55rem;
+    --radio-borde-sm: 0.35rem;
+    --sombra-suave: 0 1px 0 rgba(0, 0, 0, 0.35);
+    --sombra-media: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --transicion-base: 150ms ease;
+
+    --ancho-sidebar: 272px;
+
+    /* Redefine las variables de Bootstrap: todos los componentes que usan
+       "primary" (botones, enlaces, focos, bordes) heredan la paleta propia
+       sin tocar una sola clase de Bootstrap. */
+    --bs-primary: var(--texto);
+    --bs-primary-rgb: 238, 241, 236;
+    --bs-link-color: var(--acento);
+    --bs-link-color-rgb: var(--acento-rgb);
+    --bs-link-hover-color: #6ff5df;
+    --bs-link-hover-color-rgb: var(--acento-rgb);
+    --bs-body-font-family: var(--fuente-base);
+    --bs-body-color: var(--texto);
+    --bs-body-bg: var(--ink);
+    --bs-border-color: var(--linea);
+    --bs-border-radius: var(--radio-borde-sm);
+    --bs-border-radius-lg: var(--radio-borde);
+    --bs-border-radius-sm: 0.25rem;
+    --bs-box-shadow-sm: var(--sombra-suave);
+    --bs-focus-ring-color: rgba(var(--acento-rgb), 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+body {
+    font-family: var(--fuente-base);
+    background-color: var(--ink);
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 26px 26px;
+    background-attachment: fixed;
+    color: var(--texto);
+}
+
+::selection {
+    background-color: rgba(var(--acento-rgb), 0.3);
+    color: var(--ink);
+}
+
+:focus-visible {
+    outline: 2px solid var(--acento);
+    outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tipografía. Los títulos de pantalla usan Archivo (trazo de rótulo) y
+   llevan un distintivo cuadrado luminoso con el icono, como el testigo de
+   encendido de un instrumento, pegado al margen de la ficha. */
+/* ------------------------------------------------------------------ */
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--fuente-display);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    color: var(--texto);
+}
+
+.titulo-pantalla {
+    font-size: 1.7rem;
+    font-weight: 700;
+    margin-bottom: var(--espacio-4);
+    padding-bottom: var(--espacio-3);
+    border-bottom: 1px solid var(--linea);
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.titulo-pantalla .bi {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    background-color: var(--acento);
+    color: var(--ink);
+    border-radius: var(--radio-borde-sm);
+    box-shadow: 0 0 0 1px rgba(var(--acento-rgb), 0.4), 0 0 16px rgba(var(--acento-rgb), 0.28);
+    font-size: 1.05rem;
+    margin: 0 !important;
+    flex-shrink: 0;
+}
+
+.titulo-pantalla-detalle {
+    margin-top: calc(-1 * var(--espacio-3));
+    margin-bottom: var(--espacio-4);
+    color: var(--ink-soft);
+    max-width: 62ch;
+}
+
+.card-title, .card-header {
+    font-family: var(--fuente-display);
+    font-size: 0.98rem;
+    font-weight: 600;
+    letter-spacing: -0.002em;
+}
+
+small, .small {
+    color: var(--ink-soft);
+}
+
+/* Sobrescribe el gris "muted" por defecto de Bootstrap (pensado para fondo
+   claro) por el texto suave del sistema, legible sobre vidrio oscuro. */
+.text-muted {
+    color: var(--ink-soft) !important;
+}
+
+code {
+    font-family: var(--fuente-mono);
+    color: var(--pigmento-oxido);
+    background: rgba(var(--pigmento-oxido-rgb), 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radio-borde-sm);
+    font-size: 0.85em;
+}
+
+a {
+    transition: color var(--transicion-base);
+}
+
+/* ------------------------------------------------------------------ */
+/* Botones: tres niveles, como los controles de un panel. El primario es un
+   interruptor retroiluminado (claro sobre fondo oscuro); el de acento es la
+   acción que confirma algo a favor del usuario y se enciende al pasar el
+   cursor; el resto son fantasma, con borde de línea. El "active" imita el
+   golpe de un sello de vale. Relleno generoso: en el mostrador se toca con
+   el dedo, no solo se hace clic. */
+/* ------------------------------------------------------------------ */
+
+.btn {
+    font-family: var(--fuente-base);
+    border-radius: var(--radio-borde-sm);
+    font-weight: 600;
+    letter-spacing: 0.002em;
+    padding: 0.5rem 1rem;
+    transition: color var(--transicion-base), background-color var(--transicion-base),
+        border-color var(--transicion-base), box-shadow var(--transicion-base),
+        transform var(--transicion-base);
+}
+
+.btn-sm {
+    padding: 0.3rem 0.7rem;
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+.btn-primary {
+    --bs-btn-color: var(--ink);
+    --bs-btn-bg: var(--texto);
+    --bs-btn-border-color: var(--texto);
+    --bs-btn-hover-color: var(--ink);
+    --bs-btn-hover-bg: #ffffff;
+    --bs-btn-hover-border-color: #ffffff;
+    --bs-btn-active-bg: #ffffff;
+    --bs-btn-active-border-color: #ffffff;
+    --bs-btn-disabled-bg: var(--texto);
+    --bs-btn-disabled-border-color: var(--texto);
+}
+
+.btn-outline-secondary {
+    --bs-btn-color: var(--ink-soft);
+    --bs-btn-border-color: var(--linea-fuerte);
+    --bs-btn-hover-color: var(--texto);
+    --bs-btn-hover-bg: var(--ink-700);
+    --bs-btn-hover-border-color: var(--linea-fuerte);
+    --bs-btn-active-bg: var(--ink-700);
+    --bs-btn-active-border-color: var(--linea-fuerte);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--texto);
+    --bs-btn-border-color: var(--linea-fuerte);
+    --bs-btn-hover-color: var(--ink);
+    --bs-btn-hover-bg: var(--texto);
+    --bs-btn-hover-border-color: var(--texto);
+    --bs-btn-active-bg: #ffffff;
+    --bs-btn-active-border-color: #ffffff;
+}
+
+.btn-outline-danger {
+    --bs-btn-color: var(--pigmento-oxido);
+    --bs-btn-border-color: rgba(var(--pigmento-oxido-rgb), 0.5);
+    --bs-btn-hover-color: var(--ink);
+    --bs-btn-hover-bg: var(--pigmento-oxido);
+    --bs-btn-hover-border-color: var(--pigmento-oxido);
+}
+
+/* El acento se reserva para lo que confirma una acción positiva del
+   usuario (aceptar, marcar revisada, guardar una línea): se enciende con un
+   resplandor al pasar el cursor, como un botón retroiluminado. */
+.btn-acento {
+    --bs-btn-color: var(--ink);
+    --bs-btn-bg: var(--acento);
+    --bs-btn-border-color: var(--acento);
+    --bs-btn-hover-color: var(--ink);
+    --bs-btn-hover-bg: #5cf2dc;
+    --bs-btn-hover-border-color: #5cf2dc;
+    --bs-btn-active-bg: var(--acento-oscuro);
+    --bs-btn-active-border-color: var(--acento-oscuro);
+    color: var(--ink);
+}
+
+.btn-acento:hover, .btn-acento:focus-visible {
+    box-shadow: var(--glow-acento);
+}
+
+.btn-grande {
+    padding: 0.75rem 1.4rem;
+    font-size: 1.02rem;
+}
+
+.page-link {
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    background-color: transparent;
+    border-color: var(--linea);
+    transition: color var(--transicion-base), background-color var(--transicion-base);
+}
+
+.page-link:hover {
+    color: var(--texto);
+    background-color: var(--ink-700);
+}
+
+.page-item.active .page-link {
+    background-color: var(--acento);
+    border-color: var(--acento);
+    color: var(--ink);
+}
+
+.page-item.disabled .page-link {
+    color: var(--ink-soft);
+    background-color: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Formularios: campo hundido sobre vidrio, sin sombras internas, foco en
+   acento con resplandor. Un poco más altos que el default de Bootstrap
+   para el operador de mostrador. Los filtros de pantalla (fecha, estado)
+   siguen usando form-control-sm aparte. */
+/* ------------------------------------------------------------------ */
+
+.form-control, .form-select {
+    border-color: var(--linea-fuerte);
+    background-color: var(--superficie-hundida);
+    color: var(--texto);
+    border-radius: var(--radio-borde-sm);
+    padding: 0.55rem 0.75rem;
+}
+
+.form-select {
+    /* El caret por defecto de Bootstrap es un SVG oscuro pensado para fondo
+       claro; se redibuja en el tono de texto claro del sistema. */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23eef1ec' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+}
+
+.form-control-sm, .form-select-sm {
+    padding: 0.3rem 0.6rem;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--acento);
+    background-color: var(--superficie-hundida);
+    color: var(--texto);
+    box-shadow: 0 0 0 3px rgba(var(--acento-rgb), 0.18);
+}
+
+.form-control::placeholder {
+    color: var(--ink-soft);
+    opacity: 1;
+}
+
+.form-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--etiqueta);
+    margin-bottom: 0.3rem;
+}
+
+.input-group-text {
+    background-color: var(--superficie-hundida);
+    border-color: var(--linea-fuerte);
+    color: var(--ink-soft);
+}
+
+/* Sobrescribe la utilidad de Bootstrap usada en los iconos del login, que
+   por defecto pinta blanco sólido pensado para fondo claro. */
+.input-group-text.bg-white {
+    background-color: var(--superficie-hundida) !important;
+    color: var(--ink-soft);
+}
+
+.text-danger {
+    color: var(--pigmento-oxido) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Alertas / mensajes: barra de acento a la izquierda sobre vidrio, no el
+   bloque de color saturado por defecto de Bootstrap. */
+/* ------------------------------------------------------------------ */
+
+.alert {
+    border: 1px solid var(--linea);
+    border-left: 3px solid var(--linea-fuerte);
+    border-radius: var(--radio-borde-sm);
+    background-color: var(--superficie);
+    color: var(--texto);
+    box-shadow: none;
+}
+
+.alert-success { border-left-color: var(--pigmento-petroleo); }
+.alert-success .bi { color: var(--pigmento-petroleo); }
+
+.alert-danger { border-left-color: var(--pigmento-oxido); }
+.alert-danger .bi { color: var(--pigmento-oxido); }
+
+.alert-warning { border-left-color: var(--pigmento-ocre); }
+.alert-warning .bi { color: var(--pigmento-ocre); }
+
+.alert-info { border-left-color: var(--pigmento-pizarra); }
+.alert-info .bi { color: var(--pigmento-pizarra); }
+
+/* ------------------------------------------------------------------ */
+/* Tarjetas ("paneles"): vidrio oscuro translúcido con desenfoque, un
+   borde de 1px y un leve brillo interior superior. La jerarquía se lee por
+   el borde y el resplandor, nunca por la sombra gris homogénea del kit de
+   tarjetas genérico. */
+/* ------------------------------------------------------------------ */
+
+.card {
+    border: 1px solid var(--linea);
+    border-radius: var(--radio-borde);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    background-color: rgba(var(--superficie-rgb), 0.72);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+
+.card-body {
+    padding: var(--espacio-4);
+}
+
+.card-header {
+    background-color: var(--superficie);
+    border-bottom: 1px solid var(--linea);
+}
+
+/* ------------------------------------------------------------------ */
+/* Barra lateral: rotulada como el panel de mando del taller. Fija a la
+   izquierda en pantallas grandes, fuera de flujo (offcanvas de Bootstrap)
+   en pantallas chicas. El mismo parcial "_sidebar_contenido.html" alimenta
+   ambas versiones. Un resplandor de acento muy sutil en la esquina superior
+   le da la misma profundidad que el panel de resumen del dashboard. */
+/* ------------------------------------------------------------------ */
+
+.sidebar {
+    width: var(--ancho-sidebar);
+    background:
+        radial-gradient(circle at 10% 0%, rgba(var(--acento-rgb), 0.07), transparent 45%),
+        linear-gradient(165deg, var(--ink-700) 0%, var(--ink) 70%, #0a0d0a 100%);
+    border-right: 1px solid var(--linea);
+    color: rgba(238, 241, 236, 0.86);
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-logo {
+    padding: var(--espacio-4) var(--espacio-4) var(--espacio-4);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-logo .marca {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-family: var(--fuente-display);
+    font-weight: 800;
+    font-size: 1.2rem;
+    line-height: 1.15;
+    color: #fff;
+}
+
+.sidebar-logo .marca small {
+    font-family: var(--fuente-base);
+    font-weight: 500;
+    font-size: 0.72rem;
+    color: rgba(238, 241, 236, 0.5);
+}
+
+.sidebar-nav {
+    flex: 1 1 auto;
+    padding: var(--espacio-3) var(--espacio-2);
+    overflow-y: auto;
+}
+
+.sidebar-nav .nav-link {
+    display: flex;
+    align-items: center;
+    gap: var(--espacio-3);
+    color: rgba(238, 241, 236, 0.66);
+    padding: 0.65rem 0.75rem;
+    border-radius: var(--radio-borde-sm);
+    border-left: 3px solid transparent;
+    font-size: 0.92rem;
+    font-weight: 500;
+    margin-bottom: 2px;
+    transition: color var(--transicion-base), background-color var(--transicion-base),
+        border-color var(--transicion-base), box-shadow var(--transicion-base);
+}
+
+.sidebar-nav .nav-link .bi {
+    font-size: 1.05rem;
+    width: 1.25rem;
+    text-align: center;
+    color: rgba(238, 241, 236, 0.45);
+    transition: color var(--transicion-base);
+}
+
+.sidebar-nav .nav-link:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-nav .nav-link:hover .bi {
+    color: #fff;
+}
+
+.sidebar-nav .nav-link.active {
+    color: #fff;
+    background-color: rgba(var(--acento-rgb), 0.14);
+    border-left-color: var(--acento);
+    box-shadow: inset 0 0 16px rgba(var(--acento-rgb), 0.12);
+}
+
+.sidebar-nav .nav-link.active .bi {
+    color: var(--acento);
+}
+
+.sidebar-usuario {
+    padding: var(--espacio-3) var(--espacio-4);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    gap: var(--espacio-2);
+}
+
+.sidebar-usuario .avatar {
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radio-borde-sm);
+    background-color: rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--fuente-display);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.sidebar-usuario .usuario-nombre {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar-movil {
+    display: none;
+}
+
+.contenido-principal {
+    min-height: 100vh;
+}
+
+@media (min-width: 992px) {
+    .sidebar-escritorio {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 1030;
+    }
+
+    .contenido-principal.con-sidebar {
+        margin-left: var(--ancho-sidebar);
+    }
+}
+
+@media (max-width: 991.98px) {
+    .topbar-movil {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: var(--ink);
+        border-bottom: 1px solid var(--linea);
+        color: #fff;
+        padding: var(--espacio-3) var(--espacio-3);
+    }
+
+    .topbar-movil .marca {
+        font-family: var(--fuente-display);
+        font-weight: 700;
+    }
+
+    .topbar-movil .btn {
+        color: #fff;
+    }
+}
+
+.offcanvas-sidebar {
+    width: var(--ancho-sidebar) !important;
+    background-color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel de resumen del dashboard: la consola donde viven las tres tarjetas
+   KPI. Es el único gesto de movimiento de toda la interfaz — un barrido de
+   brillo lento, una sola vez por ciclo, nunca más de un elemento animado a
+   la vez. */
+/* ------------------------------------------------------------------ */
+
+.panel-resumen {
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 85% 0%, rgba(var(--acento-rgb), 0.10), transparent 50%),
+        linear-gradient(165deg, var(--ink-700) 0%, var(--ink) 70%, #0a0d0a 100%);
+    border: 1px solid var(--linea-fuerte);
+    border-radius: var(--radio-borde);
+    box-shadow: var(--glow-acento);
+    padding: var(--espacio-4);
+    margin-bottom: var(--espacio-4);
+}
+
+.panel-resumen::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+    animation: barrido-consola 9s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes barrido-consola {
+    0% { left: -60%; }
+    55% { left: 130%; }
+    100% { left: 130%; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tarjetas de indicadores del dashboard: una muestra de pigmento cuadrada
+   marca a cuál de los tres indicadores pertenece. La cifra grande se lee en
+   IBM Plex Mono tabular con un resplandor sutil, como el visor de un
+   instrumento digital, en vez de un número display gigante — la fórmula y
+   el detalle del periodo van en texto corrido, quietos y secundarios frente
+   a ella. */
+/* ------------------------------------------------------------------ */
+
+.tarjeta-kpi {
+    position: relative;
+    overflow: hidden;
+    border-top: 3px solid var(--linea-fuerte);
+}
+
+.tarjeta-kpi .kpi-icono {
+    position: absolute;
+    top: var(--espacio-4);
+    right: var(--espacio-4);
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radio-borde-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    color: var(--ink);
+}
+
+.tarjeta-kpi.kpi-ei { border-top-color: var(--pigmento-ocre); }
+.tarjeta-kpi.kpi-ei .kpi-icono { background-color: var(--pigmento-ocre); }
+
+.tarjeta-kpi.kpi-ns { border-top-color: var(--pigmento-petroleo); }
+.tarjeta-kpi.kpi-ns .kpi-icono { background-color: var(--pigmento-petroleo); }
+
+.tarjeta-kpi.kpi-coi { border-top-color: var(--pigmento-oxido); }
+.tarjeta-kpi.kpi-coi .kpi-icono { background-color: var(--pigmento-oxido); }
+
+.kpi-etiqueta {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    padding-right: 3.25rem;
+}
+
+.kpi-valor {
+    font-family: var(--fuente-mono);
+    font-size: 2.6rem;
+    font-weight: 600;
+    line-height: 1.05;
+    color: var(--texto);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 24px rgba(255, 255, 255, 0.16);
+    margin: var(--espacio-2) 0;
+    letter-spacing: -0.01em;
+}
+
+.kpi-formula {
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+}
+
+.kpi-comparacion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radio-borde-sm);
+    margin-top: var(--espacio-2);
+}
+
+.kpi-comparacion.mejora {
+    color: var(--acento);
+    background-color: var(--acento-claro);
+}
+
+.kpi-comparacion.empeora {
+    color: var(--pigmento-oxido);
+    background-color: rgba(var(--pigmento-oxido-rgb), 0.13);
+}
+
+.kpi-comparacion.neutro {
+    color: var(--ink-soft);
+    background-color: var(--superficie-hundida);
+}
+
+/* ------------------------------------------------------------------ */
+/* Badges de estado: chip cuadrado (como un rótulo de pigmento pegado),
+   no una píldora sólida y saturada. El color es siempre uno de los tres
+   pigmentos o un gris neutro — nunca un color nuevo por pantalla. */
+/* ------------------------------------------------------------------ */
+
+.badge-suave {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.25rem 0.55rem;
+    border-radius: var(--radio-borde-sm);
+    line-height: 1;
+    border: 1px solid transparent;
+}
+
+.badge-suave .bi {
+    font-size: 0.78rem;
+}
+
+.badge-suave-success {
+    color: var(--acento);
+    background-color: var(--acento-claro);
+    border-color: rgba(var(--acento-rgb), 0.3);
+}
+
+.badge-suave-warning {
+    color: var(--pigmento-ocre);
+    background-color: rgba(var(--pigmento-ocre-rgb), 0.14);
+    border-color: rgba(var(--pigmento-ocre-rgb), 0.32);
+}
+
+.badge-suave-danger {
+    color: var(--pigmento-oxido);
+    background-color: rgba(var(--pigmento-oxido-rgb), 0.13);
+    border-color: rgba(var(--pigmento-oxido-rgb), 0.3);
+}
+
+.badge-suave-secondary {
+    color: var(--ink-soft);
+    background-color: var(--superficie-hundida);
+    border-color: var(--linea);
+}
+
+/* ------------------------------------------------------------------ */
+/* Ranking horizontal: una lista de barras de un solo color (categorías o
+   productos, nunca "cuál es más grande" codificado también en el color —
+   el largo de la barra ya lo dice). Marca de dato fina (10px), extremo
+   redondeado en el valor, recta en la base — nunca un bloque grueso. */
+/* ------------------------------------------------------------------ */
+
+.ranking {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.ranking-fila {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 0.75rem;
+    row-gap: 0.3rem;
+    align-items: baseline;
+}
+
+.ranking-etiqueta {
+    grid-column: 1;
+    font-size: 0.86rem;
+    color: var(--texto);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ranking-etiqueta .ranking-codigo {
+    color: var(--ink-soft);
+    font-family: var(--fuente-mono);
+    font-size: 0.82em;
+}
+
+.ranking-cifra {
+    grid-column: 2;
+    font-family: var(--fuente-mono);
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ranking-pista {
+    grid-column: 1 / -1;
+    height: 10px;
+    background-color: var(--superficie-hundida);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.ranking-relleno {
+    height: 100%;
+    border-radius: 0 3px 3px 0;
+    background-color: var(--acento);
+    min-width: 3px;
+}
+
+.ranking-relleno-alterno {
+    background-color: var(--pigmento-pizarra);
+}
+
+.ranking-relleno-riesgo {
+    background-color: var(--pigmento-oxido);
+}
+
+/* ------------------------------------------------------------------ */
+/* Barra apilada (parte-todo): salud del catálogo, severidad de anomalías.
+   Los mismos cuatro colores de estado que badge-suave — un color de
+   estado nunca aparece con un significado distinto en dos gráficos del
+   mismo dashboard. Segmentos separados por un hueco de 2px del color de
+   fondo hundido, nunca por un borde. */
+/* ------------------------------------------------------------------ */
+
+.barra-apilada {
+    display: flex;
+    height: 22px;
+    border-radius: var(--radio-borde-sm);
+    overflow: hidden;
+    background-color: var(--superficie-hundida);
+    gap: 2px;
+}
+
+.barra-apilada-segmento {
+    height: 100%;
+}
+
+.barra-apilada-segmento-success { background-color: var(--pigmento-petroleo); }
+.barra-apilada-segmento-warning { background-color: var(--pigmento-ocre); }
+.barra-apilada-segmento-danger { background-color: var(--pigmento-oxido); }
+.barra-apilada-segmento-secondary { background-color: var(--pigmento-pizarra); }
+
+.leyenda-apilada {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.1rem;
+    margin-top: var(--espacio-3);
+}
+
+.leyenda-item {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.83rem;
+    color: var(--ink-soft);
+}
+
+.leyenda-item strong {
+    color: var(--texto);
+    font-weight: 700;
+    font-family: var(--fuente-mono);
+}
+
+.leyenda-marca {
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.leyenda-marca-success { background-color: var(--pigmento-petroleo); }
+.leyenda-marca-warning { background-color: var(--pigmento-ocre); }
+.leyenda-marca-danger { background-color: var(--pigmento-oxido); }
+.leyenda-marca-secondary { background-color: var(--pigmento-pizarra); }
+
+/* ------------------------------------------------------------------ */
+/* Tablas: cabecera fija en minúscula (no versalitas en mayúscula),
+   columnas numéricas en mono, resaltado suave al pasar el cursor. */
+/* ------------------------------------------------------------------ */
+
+.grid-conteo {
+    max-height: 65vh;
+    overflow-y: auto;
+}
+
+.tabla-compacta thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--superficie);
+    font-family: var(--fuente-base);
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    border-bottom: 2px solid var(--linea-fuerte);
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+}
+
+.tabla-compacta > tbody > tr > * {
+    border-bottom-color: var(--linea);
+    color: var(--texto);
+}
+
+.tabla-compacta.table-striped > tbody > tr:nth-of-type(odd) > * {
+    --bs-table-accent-bg: var(--superficie-hundida);
+}
+
+.tabla-compacta > tbody > tr:hover > * {
+    --bs-table-accent-bg: var(--acento-claro);
+}
+
+.columna-numerica,
+.table .text-end {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--fuente-mono);
+    font-size: 0.88em;
+}
+
+.fila-expandible {
+    cursor: pointer;
+    transition: background-color var(--transicion-base);
+}
+
+.fila-expandible td:first-child {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.fila-expandible .bi-chevron-right {
+    transition: transform var(--transicion-base);
+    color: var(--ink-soft);
+    font-size: 0.7rem;
+}
+
+.fila-expandible[aria-expanded='true'] .bi-chevron-right {
+    transform: rotate(90deg);
+}
+
+/* Fila de detalle expandido (pedido_lista): sobrescribe la utilidad de
+   Bootstrap, pensada para fondo claro, por el tono hundido del sistema. */
+.bg-body-tertiary {
+    background-color: var(--superficie-hundida) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Comparación de periodos: reemplaza el gráfico de evolución cuando el
+   rango filtrado tiene menos de tres meses (muy pocos puntos para una
+   línea de tiempo). Misma tabla del sistema; la muestra de pigmento
+   identifica el indicador de cada fila, igual que en las tarjetas KPI. */
+/* ------------------------------------------------------------------ */
+
+.tabla-comparacion td:first-child {
+    display: flex;
+    align-items: center;
+}
+
+.muestra-pigmento {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 2px;
+    margin-right: 0.55rem;
+    flex-shrink: 0;
+}
+
+.muestra-pigmento.muestra-ei { background-color: var(--pigmento-ocre); }
+.muestra-pigmento.muestra-ns { background-color: var(--pigmento-petroleo); }
+.muestra-pigmento.muestra-coi { background-color: var(--pigmento-oxido); }
+
+/* ------------------------------------------------------------------ */
+/* Gráficos Chart.js: el lienzo necesita una altura predecible que incluya
+   la banda de ejes, no solo el área de trazo — si no, el card recorta la
+   leyenda o mete un scroll diminuto. Los colores se fijan en el bloque de
+   script del propio dashboard, en la misma paleta luminosa. */
+/* ------------------------------------------------------------------ */
+
+.lienzo-grafico {
+    position: relative;
+    height: 220px;
+}
+
+.lienzo-grafico + .lienzo-grafico {
+    margin-top: var(--espacio-4);
+    padding-top: var(--espacio-4);
+    border-top: 1px solid var(--linea);
+}
+
+/* ------------------------------------------------------------------ */
+/* Estados vacíos: siempre con una acción o explicación, nunca una tabla
+   en blanco sin más. */
+/* ------------------------------------------------------------------ */
+
+.estado-vacio {
+    text-align: center;
+    padding: var(--espacio-6) var(--espacio-3);
+    color: var(--ink-soft);
+}
+
+.estado-vacio .estado-vacio-icono {
+    font-size: 2.1rem;
+    display: block;
+    margin-bottom: var(--espacio-2);
+    color: var(--linea-fuerte);
+}
+
+.estado-vacio-discreto {
+    text-align: center;
+    padding: var(--espacio-4) var(--espacio-2);
+    color: var(--ink-soft);
+    font-size: 0.88rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pantalla de login: panel partido — la marca sobre tinta a la izquierda
+   (el mismo gesto que la barra lateral y el panel de resumen del
+   dashboard), el formulario sobre vidrio oscuro a la derecha. En pantallas
+   chicas el panel de marca se reduce a una franja superior. */
+/* ------------------------------------------------------------------ */
+
+.pantalla-login {
+    /* Se sale del padding del ".container-fluid" del layout normal (que no
+       tiene sidebar para un usuario anónimo) para ocupar toda la ventana. */
+    margin: calc(-1 * var(--espacio-4));
+    min-height: calc(100vh - 2 * var(--espacio-4));
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    background-color: var(--ink);
+}
+
+.panel-login {
+    display: flex;
+    width: 100%;
+    max-width: 980px;
+    margin: var(--espacio-5) var(--espacio-4);
+    border: 1px solid var(--linea);
+    border-radius: var(--radio-borde);
+    overflow: hidden;
+    box-shadow: var(--sombra-media);
+    min-height: min(560px, calc(100vh - 4rem));
+}
+
+.panel-login-marca {
+    flex: 1 1 46%;
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 20% 15%, rgba(var(--acento-rgb), 0.10), transparent 45%),
+        linear-gradient(165deg, var(--ink-700) 0%, var(--ink) 65%, #0a0d0a 100%);
+    color: rgba(238, 241, 236, 0.86);
+    padding: var(--espacio-5);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.panel-login-marca .marca {
+    font-family: var(--fuente-display);
+    font-weight: 800;
+    font-size: 1.9rem;
+    line-height: 1.1;
+    color: #fff;
+}
+
+.panel-login-marca .marca small {
+    display: block;
+    font-family: var(--fuente-base);
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: rgba(238, 241, 236, 0.55);
+    margin-top: 0.4rem;
+}
+
+.panel-login-marca p {
+    max-width: 34ch;
+    color: rgba(238, 241, 236, 0.72);
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+.franja-pigmentos {
+    display: flex;
+    gap: 0.35rem;
+}
+
+.franja-pigmentos span {
+    display: block;
+    width: 1.4rem;
+    height: 1rem;
+    border-radius: 2px;
+}
+
+.franja-pigmentos span:nth-child(1) { background-color: var(--pigmento-ocre); }
+.franja-pigmentos span:nth-child(2) { background-color: var(--pigmento-petroleo); }
+.franja-pigmentos span:nth-child(3) { background-color: var(--pigmento-oxido); }
+
+.panel-login-formulario {
+    flex: 1 1 54%;
+    background-color: var(--superficie);
+    padding: var(--espacio-5);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.panel-login-formulario h1 {
+    font-size: 1.4rem;
+    margin-bottom: var(--espacio-4);
+}
+
+@media (max-width: 767.98px) {
+    .pantalla-login {
+        align-items: flex-start;
+    }
+
+    .panel-login {
+        flex-direction: column;
+        margin: 0;
+        border-radius: 0;
+        border: none;
+        min-height: 100vh;
+        box-shadow: none;
+    }
+
+    .panel-login-marca {
+        padding: var(--espacio-4);
+        flex: 0 0 auto;
+    }
+
+    .panel-login-formulario {
+        padding: var(--espacio-4);
+        flex: 1 1 auto;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Utilidades pequeñas usadas en varias pantallas. */
+/* ------------------------------------------------------------------ */
+
+.text-mono {
+    font-family: var(--fuente-mono);
+}

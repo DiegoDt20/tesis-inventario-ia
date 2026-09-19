@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% load inventario_extras %}
+
+{% block titulo %}Anomalías{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-shield-exclamation me-2"></i>Anomalías sin revisar</h1>
+<p class="titulo-pantalla-detalle">
+    Diferencias de inventario y movimientos atípicos detectados automáticamente, de mayor a menor severidad.
+</p>
+
+{% if pagina.object_list %}
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>Producto</th>
+                        <th>Tipo</th>
+                        <th>Severidad</th>
+                        <th>Descripción</th>
+                        <th>Detectada</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in pagina %}
+                        <tr>
+                            <td>{{ a.producto.codigo }} — {{ a.producto.nombre }}</td>
+                            <td>{{ a.get_tipo_display }}</td>
+                            <td>
+                                <span class="badge-suave badge-suave-{{ a.severidad|color_estado }}">
+                                    <i class="bi {{ a.severidad|icono_estado }}"></i> {{ a.get_severidad_display }}
+                                </span>
+                            </td>
+                            <td>{{ a.descripcion }}</td>
+                            <td>{{ a.fecha_deteccion|date:'d/m/Y H:i' }}</td>
+                            <td>
+                                <form method="post" action="{% url 'inventario:anomalia_marcar_revisada' a.pk %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-check2 me-1"></i>Marcar revisada
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include 'inventario/_paginacion.html' %}
+{% else %}
+    <div class="card">
+        <div class="estado-vacio">
+            <i class="bi bi-check2-circle estado-vacio-icono"></i>
+            No hay anomalías sin revisar.<br>
+            Pide a un administrador que corra <code>detectar_anomalias</code> desde la línea de comandos.
+        </div>
+    </div>
+{% endif %}
+{% endblock %}

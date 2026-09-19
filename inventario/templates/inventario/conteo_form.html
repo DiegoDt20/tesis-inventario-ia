@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block titulo %}Conteo físico{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-clipboard-check me-2"></i>Conteo físico</h1>
+<p class="titulo-pantalla-detalle">
+    Escribe el stock contado producto por producto; el sistema calcula la diferencia y de ahí sale la exactitud
+    del inventario.
+</p>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="fecha">Fecha de corte</label>
+        <input type="date" id="fecha" name="fecha" value="{{ fecha_corte|date:'Y-m-d' }}" class="form-control form-control-sm">
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-repeat me-1"></i>Cargar</button>
+    </div>
+</form>
+
+<p class="text-muted small d-flex align-items-start gap-2">
+    {% if conteo %}
+        <i class="bi bi-hourglass-split mt-1"></i>
+        <span>
+            Conteo del {{ fecha_corte|date:'d/m/Y' }} en progreso: {{ total_contados }} de {{ total_productos }}
+            producto(s) contados. Puedes guardar lo que tengas y continuar más tarde.
+        </span>
+    {% else %}
+        <i class="bi bi-info-circle mt-1"></i>
+        <span>
+            Todavía no hay nada guardado para el {{ fecha_corte|date:'d/m/Y' }}. Escribe el stock contado de los
+            productos que ya revisaste y guarda: puedes dejar el resto en blanco y continuar después.
+        </span>
+    {% endif %}
+</p>
+
+<form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="fecha_corte" value="{{ fecha_corte|date:'Y-m-d' }}">
+
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label" for="responsable">Responsable del conteo</label>
+        <input type="text" id="responsable" name="responsable" value="{{ responsable }}" class="form-control">
+    </div>
+
+    <div class="card">
+        <div class="table-responsive grid-conteo">
+            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Producto</th>
+                        <th class="text-end">Stock de sistema</th>
+                        <th class="text-end" style="width: 140px;">Stock contado</th>
+                        <th class="text-end">Diferencia</th>
+                        <th>¿Registro correcto?</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for fila in filas %}
+                        <tr>
+                            <td>{{ fila.producto.codigo }}</td>
+                            <td>{{ fila.producto.nombre }} {{ fila.producto.presentacion }}</td>
+                            <td class="text-end">{{ fila.producto.stock_actual|floatformat:0 }}</td>
+                            <td>
+                                <input type="number" min="0" class="form-control form-control-sm text-end"
+                                       name="stock_{{ fila.producto.pk }}" value="{{ fila.stock_fisico_previo }}">
+                            </td>
+                            <td class="text-end">
+                                {% if fila.diferencia_previa is not None %}{{ fila.diferencia_previa|floatformat:0 }}{% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if fila.diferencia_previa is not None %}
+                                    {% if fila.diferencia_previa == 0 %}
+                                        <span class="badge-suave badge-suave-success"><i class="bi bi-check-circle-fill"></i> Correcto</span>
+                                    {% else %}
+                                        <span class="badge-suave badge-suave-danger"><i class="bi bi-exclamation-octagon-fill"></i> Con diferencia</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Sin contar</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-grande mt-3"><i class="bi bi-save me-1"></i>Guardar avance</button>
+</form>
+{% endblock %}

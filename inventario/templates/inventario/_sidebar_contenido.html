@@ -1,0 +1,51 @@
+{% comment %}
+Contenido de la barra lateral: se incluye dos veces (sidebar fija en
+escritorio y offcanvas en pantallas chicas) para no duplicar el menú.
+{% endcomment %}
+<div class="sidebar-logo">
+    <div class="marca">Almacén Pinturas <small>Gestión de inventario</small></div>
+</div>
+
+<nav class="sidebar-nav nav flex-column">
+    <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+       href="{% url 'inventario:dashboard' %}">
+        <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'pedido_lista' or request.resolver_match.url_name == 'pedido_nuevo' %}active{% endif %}"
+       href="{% url 'inventario:pedido_lista' %}">
+        <i class="bi bi-cart3"></i> Pedidos
+    </a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'movimiento_nuevo' %}active{% endif %}"
+       href="{% url 'inventario:movimiento_nuevo' %}">
+        <i class="bi bi-arrow-left-right"></i> Movimientos
+    </a>
+    <a class="nav-link {% if request.resolver_match.url_name == 'conteo_nuevo' %}active{% endif %}"
+       href="{% url 'inventario:conteo_nuevo' %}">
+        <i class="bi bi-clipboard-check"></i> Conteos
+    </a>
+    {% if perms.inventario.change_recomendacion %}
+        <a class="nav-link {% if request.resolver_match.url_name == 'recomendaciones_lista' %}active{% endif %}"
+           href="{% url 'inventario:recomendaciones_lista' %}">
+            <i class="bi bi-lightbulb"></i> Recomendaciones
+        </a>
+    {% endif %}
+    {% if perms.inventario.change_anomalia %}
+        <a class="nav-link {% if request.resolver_match.url_name == 'anomalias_lista' %}active{% endif %}"
+           href="{% url 'inventario:anomalias_lista' %}">
+            <i class="bi bi-exclamation-triangle"></i> Anomalías
+        </a>
+    {% endif %}
+</nav>
+
+<div class="sidebar-usuario">
+    <div class="avatar">{{ user.username|slice:':1'|upper }}</div>
+    <div class="flex-grow-1 overflow-hidden">
+        <div class="usuario-nombre">{{ user.username }}</div>
+    </div>
+    <form method="post" action="{% url 'logout' %}" class="mb-0">
+        {% csrf_token %}
+        <button class="btn btn-sm btn-link text-white-50 p-0" type="submit" title="Cerrar sesión">
+            <i class="bi bi-box-arrow-right fs-5"></i>
+        </button>
+    </form>
+</div>

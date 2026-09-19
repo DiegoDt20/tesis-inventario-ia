@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+
+{% block titulo %}Nuevo pedido{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-cart-plus me-2"></i>Registrar pedido</h1>
+<p class="titulo-pantalla-detalle">
+    Si no se entrega todo lo pedido, indica cuánto y por qué: de ahí sale el nivel de servicio.
+</p>
+
+{% include 'inventario/_lista_productos.html' %}
+
+<form method="post">
+    {% csrf_token %}
+    {{ formset.management_form }}
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h6 class="card-title"><i class="bi bi-person-lines-fill me-1"></i> Datos del pedido</h6>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label" for="{{ pedido_form.fecha_solicitud.id_for_label }}">
+                        {{ pedido_form.fecha_solicitud.label }}
+                    </label>
+                    {{ pedido_form.fecha_solicitud }}
+                    {% for error in pedido_form.fecha_solicitud.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label" for="{{ pedido_form.cliente.id_for_label }}">
+                        {{ pedido_form.cliente.label }}
+                    </label>
+                    {{ pedido_form.cliente }}
+                    {% for error in pedido_form.cliente.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="{{ pedido_form.canal.id_for_label }}">
+                        {{ pedido_form.canal.label }}
+                    </label>
+                    {{ pedido_form.canal }}
+                    {% for error in pedido_form.canal.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h6 class="card-title"><i class="bi bi-list-ul me-1"></i> Líneas del pedido</h6>
+            {% if formset.non_form_errors %}
+                <div class="alert alert-danger py-2 d-flex align-items-center gap-2">
+                    <i class="bi bi-x-circle-fill"></i>{{ formset.non_form_errors }}
+                </div>
+            {% endif %}
+            {% for linea in formset %}
+                <div class="row g-2 align-items-start border-bottom pb-2 mb-2">
+                    <div class="col-md-4">
+                        {% if forloop.first %}<label class="form-label small mb-1">Producto</label>{% endif %}
+                        {{ linea.producto }}
+                        {% for error in linea.producto.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1">Cant. solicitada</label>{% endif %}
+                        {{ linea.cantidad_solicitada }}
+                        {% for error in linea.cantidad_solicitada.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1">Cant. atendida</label>{% endif %}
+                        {{ linea.cantidad_atendida }}
+                        {% for error in linea.cantidad_atendida.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1">Fecha requerida</label>{% endif %}
+                        {{ linea.fecha_requerida }}
+                        {% for error in linea.fecha_requerida.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1">Motivo si falta</label>{% endif %}
+                        {{ linea.motivo_no_atencion }}
+                        {% for error in linea.motivo_no_atencion.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+            <button type="submit" name="agregar_linea" value="1" class="btn btn-outline-secondary btn-sm mt-2">
+                <i class="bi bi-plus-lg me-1"></i>Agregar otra línea
+            </button>
+        </div>
+    </div>
+
+    <button type="submit" name="guardar" value="1" class="btn btn-primary btn-grande">
+        <i class="bi bi-check-lg me-1"></i>Guardar pedido
+    </button>
+    <a href="{% url 'inventario:pedido_lista' %}" class="btn btn-outline-secondary"><i class="bi bi-x-lg me-1"></i>Cancelar</a>
+</form>
+{% endblock %}
