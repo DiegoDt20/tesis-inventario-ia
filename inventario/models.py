@@ -605,6 +605,14 @@ class TipoDocumento(models.TextChoices):
     ANOMALIA = 'anomalia', 'Anomalía'
     INDICADOR = 'indicador', 'Indicador'
     MODELO = 'modelo', 'Estado del modelo'
+    # Documentos agregados (no vienen de un único registro): existen para
+    # que una pregunta general sobre el estado del inventario se responda
+    # con una vista de conjunto, en vez de con fichas de producto sueltas
+    # traídas por similitud semántica pura (ver
+    # inventario/asistente/recuperador.py).
+    RESUMEN_CATEGORIA = 'resumen_categoria', 'Resumen por categoría'
+    RESUMEN_ESTADO = 'resumen_estado', 'Resumen de estados del catálogo'
+    RESUMEN_ANOMALIAS = 'resumen_anomalias', 'Resumen de anomalías'
 
 
 class DocumentoIndexado(models.Model):

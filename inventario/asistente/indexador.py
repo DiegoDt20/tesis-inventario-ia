@@ -2,7 +2,14 @@
 conversacional a partir de la base de datos: ficha de cada producto activo
 con su stock/categoría/precio/demanda reciente, las recomendaciones
 vigentes con su explicación, las anomalías sin revisar, los indicadores del
-periodo reciente y el estado del modelo de predicción activo.
+periodo reciente, el estado del modelo de predicción activo, y documentos
+de resumen agregados (por categoría, por estado del catálogo y de
+anomalías por severidad).
+
+Los documentos de resumen existen para que una pregunta general ("¿cómo va
+el inventario?") tenga algo mejor que responder que fichas de producto
+sueltas: son los que
+inventario/asistente/recuperador.py prioriza para ese tipo de pregunta.
 
 Cada documento se guarda con su embedding (generado localmente, ver
 embeddings.py) en DocumentoIndexado. El comando "indexar_conocimiento"
@@ -10,11 +17,12 @@ llama a reindexar() para regenerar el índice completo.
 """
 from datetime import date, timedelta
 
-from django.db.models import Sum
+from django.db.models import Count, Sum
 
 from inventario.indicadores import calcular_coi, calcular_ei, calcular_ns
 from inventario.models import (
     Anomalia,
+    Categoria,
     DocumentoIndexado,
     ModeloEntrenado,
     PedidoDetalle,
@@ -126,6 +134,84 @@ def _documento_modelo():
     return [(TipoDocumento.MODELO, modelo.pk, contenido)]
 
 
+def _documentos_resumen_categoria():
+    """Un documento por categoría comercial con el total de productos
+    activos y su stock agregado: la vista de conjunto que le falta a las
+    fichas de producto sueltas para responder "¿cómo está el inventario de
+    esmaltes?" sin traer productos al azar."""
+    filas = (
+        Producto.objects.filter(activo=True)
+        .values('categoria')
+        .annotate(total_productos=Count('id'), stock_total=Sum('stock_actual'))
+        .order_by('-stock_total')
+    )
+    etiquetas = dict(Categoria.choices)
+    documentos = []
+    for fila in filas:
+        etiqueta = etiquetas.get(fila['categoria'], fila['categoria'])
+        contenido = (
+            f'Resumen de la categoría {etiqueta}: {fila["total_productos"]} producto(s) activo(s), '
+            f'stock total de {fila["stock_total"] or 0} unidades.'
+        )
+        documentos.append((TipoDocumento.RESUMEN_CATEGORIA, None, contenido))
+    return documentos
+
+
+def _documento_resumen_estado():
+    """Conteo de productos por estado (crítico/reponer/normal/exceso) del
+    último lote de recomendaciones generado: el resumen que responde
+    "¿cómo va el negocio?" de un vistazo, en vez de una ficha de producto."""
+    ultima_fecha = (
+        Recomendacion.objects.order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
+    )
+    if ultima_fecha is None:
+        return []
+
+    conteos = {estado: 0 for estado in Recomendacion.Estado.values}
+    filas = (
+        Recomendacion.objects.filter(fecha_generacion=ultima_fecha)
+        .values('estado').annotate(total=Count('id'))
+    )
+    for fila in filas:
+        conteos[fila['estado']] = fila['total']
+    total = sum(conteos.values())
+
+    contenido = (
+        f'Estado del catálogo según el último lote de recomendaciones ({ultima_fecha:%d/%m/%Y}), '
+        f'de {total} producto(s) evaluado(s): '
+        f'{conteos[Recomendacion.Estado.CRITICO]} en estado crítico, '
+        f'{conteos[Recomendacion.Estado.REPONER]} para reponer, '
+        f'{conteos[Recomendacion.Estado.NORMAL]} en estado normal, '
+        f'{conteos[Recomendacion.Estado.EXCESO]} en exceso de stock.'
+    )
+    return [(TipoDocumento.RESUMEN_ESTADO, None, contenido)]
+
+
+def _documento_resumen_anomalias():
+    """Conteo de anomalías sin revisar por severidad: siempre se genera,
+    incluso en cero, para que el asistente pueda decir "no hay anomalías
+    pendientes" en vez de no tener nada que decir al respecto."""
+    conteos = {severidad: 0 for severidad in Anomalia.Severidad.values}
+    filas = (
+        Anomalia.objects.filter(revisada=False)
+        .values('severidad').annotate(total=Count('id'))
+    )
+    for fila in filas:
+        conteos[fila['severidad']] = fila['total']
+    total = sum(conteos.values())
+
+    if total == 0:
+        contenido = 'Resumen de anomalías: no hay anomalías sin revisar.'
+    else:
+        contenido = (
+            f'Resumen de anomalías sin revisar ({total} en total): '
+            f'{conteos[Anomalia.Severidad.ALTA]} de severidad alta, '
+            f'{conteos[Anomalia.Severidad.MEDIA]} de severidad media, '
+            f'{conteos[Anomalia.Severidad.BAJA]} de severidad baja.'
+        )
+    return [(TipoDocumento.RESUMEN_ANOMALIAS, None, contenido)]
+
+
 def construir_documentos():
     """Arma la lista completa de documentos (tipo, referencia_id,
     contenido) a indexar, sin generar todavía los embeddings."""
@@ -135,6 +221,9 @@ def construir_documentos():
     documentos += _documentos_anomalia()
     documentos += _documento_indicadores()
     documentos += _documento_modelo()
+    documentos += _documentos_resumen_categoria()
+    documentos += _documento_resumen_estado()
+    documentos += _documento_resumen_anomalias()
     return documentos
 
 
