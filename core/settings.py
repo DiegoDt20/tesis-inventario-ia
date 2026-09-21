@@ -134,3 +134,20 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'inventario:dashboard'
 LOGOUT_REDIRECT_URL = 'login'
+
+
+# Asistente conversacional (RAG)
+# ------------------------------
+# Proveedor del modelo de lenguaje: por ahora Ollama local (los datos de la
+# microempresa nunca salen del equipo), con una interfaz común
+# (inventario/asistente/proveedores.py) para poder pasar a una API externa
+# más adelante cambiando solo estas variables, sin tocar el resto del
+# módulo.
+LLM_PROVEEDOR = config('LLM_PROVEEDOR', default='ollama')
+LLM_MODELO = config('LLM_MODELO', default='qwen2.5:7b')
+LLM_URL = config('LLM_URL', default='http://localhost:11434')
+
+# Razón social de la microempresa: si aparece en algún documento del RAG, el
+# anonimizador la redacta antes de enviar cualquier dato a la API del
+# modelo de lenguaje (inventario/asistente/anonimizador.py). Opcional.
+EMPRESA_RAZON_SOCIAL = config('EMPRESA_RAZON_SOCIAL', default='')

@@ -5,9 +5,11 @@ from .models import (
     Anomalia,
     Compra,
     CompraDetalle,
+    ConsultaAsistente,
     ConteoDetalle,
     ConteoFisico,
     CostoAlmacenamiento,
+    DocumentoIndexado,
     Merma,
     ModeloEntrenado,
     Movimiento,
@@ -183,3 +185,20 @@ class AnomaliaAdmin(admin.ModelAdmin):
     def marcar_revisada(self, request, queryset):
         actualizadas = queryset.update(revisada=True, fecha_revision=timezone.now())
         self.message_user(request, f'{actualizadas} anomalía(s) marcada(s) como revisada(s).')
+
+
+@admin.register(DocumentoIndexado)
+class DocumentoIndexadoAdmin(admin.ModelAdmin):
+    list_display = ('tipo', 'referencia_id', 'fecha_indexacion')
+    list_filter = ('tipo',)
+    search_fields = ('contenido',)
+    readonly_fields = ('embedding', 'fecha_indexacion')
+
+
+@admin.register(ConsultaAsistente)
+class ConsultaAsistenteAdmin(admin.ModelAdmin):
+    list_display = ('fecha', 'usuario', 'pregunta')
+    list_filter = ('fecha', 'usuario')
+    search_fields = ('pregunta', 'respuesta')
+    readonly_fields = ('fecha',)
+    date_hierarchy = 'fecha'

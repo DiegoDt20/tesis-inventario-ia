@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block titulo %}Asistente{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-chat-dots me-2"></i>Asistente conversacional</h1>
+<p class="titulo-pantalla-detalle">
+    Responde solo con datos ya calculados por el sistema. Cada respuesta muestra debajo qué documentos se usaron,
+    para que sea auditable.
+</p>
+
+<div class="card mb-3">
+    <div class="card-body">
+        {% if historial %}
+            <div class="chat-historial">
+                {% for turno in historial %}
+                    <div class="chat-mensaje chat-mensaje-usuario">
+                        <div class="chat-mensaje-etiqueta">Tú</div>
+                        <div class="chat-mensaje-cuerpo">{{ turno.pregunta }}</div>
+                    </div>
+                    <div class="chat-mensaje chat-mensaje-asistente {% if turno.fallo %}chat-mensaje-fallo{% endif %}">
+                        <div class="chat-mensaje-etiqueta">
+                            {% if turno.fallo %}
+                                <i class="bi bi-exclamation-triangle-fill"></i> Asistente (sin conexión con el modelo)
+                            {% else %}
+                                Asistente
+                            {% endif %}
+                        </div>
+                        <div class="chat-mensaje-cuerpo">{{ turno.respuesta|linebreaksbr }}</div>
+
+                        {% if turno.documentos %}
+                            <details class="chat-fuentes">
+                                <summary>Fuentes usadas ({{ turno.documentos|length }})</summary>
+                                <ul>
+                                    {% for doc in turno.documentos %}
+                                        <li><strong>{{ doc.tipo }}</strong>{% if doc.referencia_id %} #{{ doc.referencia_id }}{% endif %}: {{ doc.contenido }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </details>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="estado-vacio">
+                <i class="bi bi-chat-dots estado-vacio-icono"></i>
+                Todavía no hay conversación. Escribe una pregunta sobre stock, recomendaciones, anomalías o indicadores.
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<form method="post" action="{% url 'inventario:asistente_chat' %}" class="chat-form">
+    {% csrf_token %}
+    <input type="text" name="pregunta" class="form-control" placeholder="Escribe tu pregunta..." autocomplete="off" required autofocus>
+    <button type="submit" class="btn btn-primary"><i class="bi bi-send me-1"></i>Enviar</button>
+</form>
+
+{% if historial %}
+    <form method="post" action="{% url 'inventario:asistente_limpiar' %}" class="mt-2">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-trash me-1"></i>Limpiar conversación
+        </button>
+    </form>
+{% endif %}
+{% endblock %}

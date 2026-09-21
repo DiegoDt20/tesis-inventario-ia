@@ -35,6 +35,10 @@ escritorio y offcanvas en pantallas chicas) para no duplicar el menú.
             <i class="bi bi-exclamation-triangle"></i> Anomalías
         </a>
     {% endif %}
+    <a class="nav-link {% if request.resolver_match.url_name == 'asistente_chat' %}active{% endif %}"
+       href="{% url 'inventario:asistente_chat' %}">
+        <i class="bi bi-chat-dots"></i> Asistente
+    </a>
 </nav>
 
 <div class="sidebar-usuario">

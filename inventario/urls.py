@@ -29,4 +29,7 @@ urlpatterns = [
         'anomalias/<int:pk>/revisar/',
         views.anomalia_marcar_revisada, name='anomalia_marcar_revisada',
     ),
+
+    path('asistente/', views.asistente_chat, name='asistente_chat'),
+    path('asistente/limpiar/', views.asistente_limpiar, name='asistente_limpiar'),
 ]

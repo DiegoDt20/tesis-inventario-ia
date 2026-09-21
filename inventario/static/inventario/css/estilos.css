@@ -1193,3 +1193,71 @@ a {
 .text-mono {
     font-family: var(--fuente-mono);
 }
+
+/* ------------------------------------------------------------------ */
+/* Asistente conversacional. */
+/* ------------------------------------------------------------------ */
+
+.chat-historial {
+    display: flex;
+    flex-direction: column;
+    gap: var(--espacio-3);
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.chat-mensaje {
+    max-width: 80%;
+    padding: var(--espacio-3);
+    border-radius: var(--radio-borde);
+    border: 1px solid var(--linea);
+    background: var(--superficie-hundida);
+}
+
+.chat-mensaje-usuario {
+    align-self: flex-end;
+    background: var(--acento-claro);
+    border-color: rgba(var(--acento-rgb), 0.35);
+}
+
+.chat-mensaje-asistente {
+    align-self: flex-start;
+}
+
+.chat-mensaje-fallo {
+    border-color: rgba(var(--pigmento-oxido-rgb), 0.45);
+}
+
+.chat-mensaje-etiqueta {
+    font-family: var(--fuente-mono);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+    margin-bottom: var(--espacio-1);
+}
+
+.chat-mensaje-cuerpo {
+    white-space: pre-wrap;
+}
+
+.chat-fuentes {
+    margin-top: var(--espacio-2);
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+}
+
+.chat-fuentes summary {
+    cursor: pointer;
+    color: var(--acento);
+}
+
+.chat-fuentes ul {
+    margin: var(--espacio-2) 0 0;
+    padding-left: 1.1rem;
+}
+
+.chat-form {
+    display: flex;
+    gap: var(--espacio-2);
+}

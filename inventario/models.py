@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
+from pgvector.django import VectorField
 
 
 class Origen(models.TextChoices):
@@ -593,3 +594,73 @@ class Anomalia(models.Model):
 
     def __str__(self):
         return f'{self.producto.codigo} - {self.get_tipo_display()} ({self.get_severidad_display()})'
+
+
+class TipoDocumento(models.TextChoices):
+    """Categoría de un DocumentoIndexado, según de qué parte del sistema
+    sale el contenido que se indexa para el RAG del asistente
+    conversacional."""
+    PRODUCTO = 'producto', 'Producto'
+    RECOMENDACION = 'recomendacion', 'Recomendación'
+    ANOMALIA = 'anomalia', 'Anomalía'
+    INDICADOR = 'indicador', 'Indicador'
+    MODELO = 'modelo', 'Estado del modelo'
+
+
+class DocumentoIndexado(models.Model):
+    """Unidad de contexto del índice RAG del asistente conversacional
+    (inventario/asistente/): ficha de un producto, una recomendación
+    vigente, una anomalía sin revisar, los indicadores de un periodo, o el
+    estado del modelo de predicción activo. `embedding` se genera
+    localmente con sentence-transformers (inventario/asistente/embeddings.py)
+    y se compara por distancia coseno al recuperar contexto para una
+    pregunta (inventario/asistente/recuperador.py).
+
+    El comando "indexar_conocimiento" reconstruye esta tabla por completo
+    en cada corrida: no se actualiza de forma incremental.
+    """
+    tipo = models.CharField(max_length=20, choices=TipoDocumento.choices, db_index=True)
+    # PK del registro de origen (Producto, Recomendacion, Anomalia...), o
+    # None para documentos calculados que no vienen de un único registro
+    # (indicadores del periodo, estado del modelo).
+    referencia_id = models.IntegerField(null=True, blank=True)
+    contenido = models.TextField()
+    embedding = VectorField(dimensions=384)
+    fecha_indexacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Documento indexado'
+        verbose_name_plural = 'Documentos indexados'
+        indexes = [
+            models.Index(fields=['tipo', 'referencia_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} #{self.referencia_id or "-"}'
+
+
+class ConsultaAsistente(models.Model):
+    """Registro de una pregunta y respuesta del asistente conversacional
+    (inventario/asistente/): sirve para auditar qué se usó para responder
+    (documentos_usados) y para la discusión de la tesis sobre el uso y la
+    confianza en el sistema."""
+    pregunta = models.TextField()
+    respuesta = models.TextField()
+    # Lista de dicts {'tipo', 'referencia_id', 'contenido'} con los
+    # DocumentoIndexado recuperados para esta consulta, para poder
+    # auditarla sin depender de que esos documentos sigan existiendo tal
+    # cual (el índice se reconstruye completo en cada "indexar_conocimiento").
+    documentos_usados = models.JSONField(default=list, blank=True)
+    fecha = models.DateTimeField(auto_now_add=True, db_index=True)
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='consultas_asistente',
+    )
+
+    class Meta:
+        verbose_name = 'Consulta al asistente'
+        verbose_name_plural = 'Consultas al asistente'
+        ordering = ['-fecha']
+
+    def __str__(self):
+        return f'{self.fecha:%Y-%m-%d %H:%M} - {self.pregunta[:50]}'
