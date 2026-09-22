@@ -24,9 +24,12 @@ indicadores.
 
 - **Costos operativos de inventario (COI)**
   `COI = costos de almacenamiento + pérdidas por desabastecimiento`
-  Se apoya en `CostoAlmacenamiento` (costos de almacenamiento) y `Merma`
-  combinada con pedidos no atendidos por falta de stock (pérdidas por
-  desabastecimiento).
+  Se apoya en `CostoAlmacenamiento` (costos de almacenamiento) y en los
+  `PedidoDetalle` no atendidos por completo, valorizados al margen
+  (`precio_venta - costo_compra`) del producto (pérdidas por
+  desabastecimiento). `calcular_coi()` (`inventario/servicios/indicadores.py`)
+  todavía **no** sustrae `Merma`: ese modelo registra pérdidas por deterioro,
+  vencimiento u obsolescencia pero no está incorporado a esta fórmula.
 
 ## Stack
 
@@ -38,6 +41,29 @@ indicadores.
 - Todos los montos monetarios son `DecimalField(max_digits=12,
   decimal_places=2)`, nunca `FloatField`, para evitar errores de redondeo en
   los cálculos de costos.
+
+## Estructura del proyecto
+
+- `inventario/models/` — paquete de modelos, dividido por dominio:
+  `operacion.py` (catálogo, compras, movimientos, pedidos, conteos),
+  `costos.py` (mermas y costos de almacenamiento) e `ia.py` (motor de
+  predicción, motor de decisiones, anomalías, asistente conversacional).
+  Todo se reexporta desde `inventario/models/__init__.py`, así que
+  `from inventario.models import X` sigue funcionando igual sin importar en
+  qué submódulo viva `X`.
+- `inventario/views/` — paquete de vistas, un archivo por pantalla:
+  `dashboard.py`, `pedidos.py`, `movimientos.py`, `conteos.py`,
+  `recomendaciones.py`, `anomalias.py`, `asistente.py`, más `_comunes.py`
+  con los parseos de querystring compartidos. `urls.py` importa cada
+  submódulo directamente (`from .views import dashboard, pedidos, ...`).
+- `inventario/servicios/indicadores.py` — cálculo de EI/NS/COI (antes
+  `inventario/indicadores.py`).
+- `inventario/tests/` — paquete de tests, un archivo `test_*.py` por área
+  (p. ej. `test_carga_datos.py`, `test_ml.py`, `test_vistas.py`).
+- `artefactos/modelos_ml/` — modelos de XGBoost entrenados (`.json`), no se
+  versiona (`artefactos/` en `.gitignore`). Antes era `modelos/`.
+- `inventario/ml/`, `inventario/decisiones/`, `inventario/asistente/` y
+  `inventario/management/commands/` no cambiaron de ubicación.
 
 ## Estado actual
 
@@ -97,12 +123,38 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
 - Comandos: `entrenar_base`, `entrenar_ajustado`, `predecir_demanda --dias
   N`, `evaluar_predicciones`.
 - Los archivos de modelo entrenado (`.json` de XGBoost) se guardan en
-  `modelos/`, que no se versiona (`.gitignore`).
+  `artefactos/modelos_ml/`, que no se versiona (`.gitignore`).
 - Dependencias añadidas: `pandas`, `numpy`, `scikit-learn`, `xgboost`.
 
-Explícitamente **fuera de alcance** por ahora: chat/IA conversacional y
-frontend. Deben apoyarse en este mismo modelo de datos (y en el motor de
-predicción, cuando aplique) salvo que el usuario indique lo contrario.
+### Etapa 3 — motor de decisiones, detección de anomalías y asistente conversacional (implementados)
+
+Ya no están fuera de alcance: los tres están implementados y en uso.
+
+- **Motor de decisiones** (`inventario/decisiones/`) — determinístico, no
+  IA: `calculos.py` (stock de seguridad, punto de reorden, cantidad a
+  pedir) y `motor.py` (arma la `Recomendacion` con la explicación en texto
+  de `explicacion.py`). Comando `generar_recomendaciones`.
+- **Detección de anomalías** (`inventario/ml/anomalias.py`) — Isolation
+  Forest + regla del 20% sobre diferencias de inventario
+  (`ConteoDetalle`), y z-score sobre el histórico propio de cada producto
+  para movimientos atípicos (mínimo `MIN_MOVIMIENTOS_ZSCORE = 5`
+  movimientos previos). Guarda registros `Anomalia`. Comando
+  `detectar_anomalias`.
+- **Asistente conversacional (RAG)** (`inventario/asistente/`) —
+  `indexador.py` construye `DocumentoIndexado` (fichas de producto,
+  recomendaciones vigentes, anomalías sin revisar, indicadores del
+  periodo, estado del modelo) con embeddings de `sentence-transformers`
+  (`paraphrase-multilingual-MiniLM-L12-v2`, local); `recuperador.py` trae
+  contexto por similitud coseno; `asistente.py` arma el prompt y llama al
+  LLM configurado (`proveedores.py`, Ollama por defecto — ver
+  `LLM_PROVEEDOR`/`LLM_MODELO`/`LLM_URL`); `anonimizador.py` redacta
+  nombres de clientes, razón social, correos y teléfonos antes de enviar
+  cualquier contexto al LLM. El LLM nunca calcula cifras, solo redacta las
+  que ya vienen en el contexto recuperado; si el proveedor falla, se
+  muestran los datos crudos sin redactar. Comando `indexar_conocimiento`.
+
+Frontend (más allá de las plantillas Django + Bootstrap ya implementadas)
+sigue fuera de alcance salvo que el usuario indique lo contrario.
 
 ## Convenciones a mantener
 

@@ -10,16 +10,4 @@ media/
 .vscode/
 .idea/
 datos/
-modelos/
-.env
-venv/
-datos/
-modelos/
-__pycache__/
-*.pyc
-.env
-venv/
-datos/
-modelos/
-__pycache__/
-*.pyc
+artefactos/

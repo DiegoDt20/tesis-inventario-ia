@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from django.db.models import F, Max, Min, Sum
 
-from .models import ConteoDetalle, ConteoFisico, CostoAlmacenamiento, Origen, Pedido, PedidoDetalle
+from ..models import ConteoDetalle, ConteoFisico, CostoAlmacenamiento, Origen, Pedido, PedidoDetalle
 
 
 def calcular_ei(fecha_inicio=None, fecha_fin=None, origen=None):

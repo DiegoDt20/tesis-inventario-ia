@@ -15,7 +15,7 @@ from inventario.asistente import indexador, recuperador
 from inventario.asistente.anonimizador import anonimizar_texto
 from inventario.asistente.asistente import PROMPT_SISTEMA, consultar_asistente
 from inventario.asistente.proveedores import ErrorProveedorLLM
-from inventario.indicadores import calcular_ns, rango_disponible
+from inventario.servicios.indicadores import calcular_ns, rango_disponible
 from inventario.models import (
     Categoria,
     ConsultaAsistente,

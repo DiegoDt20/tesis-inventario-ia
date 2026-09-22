@@ -19,7 +19,7 @@ import xgboost as xgb
 
 from .features import COLUMNAS_FEATURES, construir_features, dividir_temporal
 
-DIR_MODELOS = Path('modelos')
+DIR_MODELOS = Path('artefactos/modelos_ml')
 
 # Fase 1: entrena desde cero, con más árboles y un learning rate normal.
 HIPERPARAMETROS_BASE = {

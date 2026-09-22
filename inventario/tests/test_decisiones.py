@@ -48,7 +48,7 @@ class MotorRecomendacionesTests(TestCase):
             algoritmo='XGBRegressor',
             hiperparametros={},
             mae=1.0, rmse=1.0, smape=0.1, r2=0.9,
-            ruta_archivo='modelos/test.json',
+            ruta_archivo='artefactos/modelos_ml/test.json',
         )
 
     def _crear_producto(self, codigo, stock_actual, lead_time_dias=5):

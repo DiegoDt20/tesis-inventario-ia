@@ -1,4 +1,4 @@
-"""Tests de inventario.indicadores: EI, NS y COI con datos conocidos.
+"""Tests de inventario.servicios.indicadores: EI, NS y COI con datos conocidos.
 
 Estas son las mismas funciones que usan el dashboard y el comando
 cargar_datos, así que verificarlas aquí cubre ambos usos.
@@ -9,7 +9,7 @@ from decimal import Decimal
 from django.test import TestCase
 from django.utils import timezone
 
-from inventario.indicadores import calcular_coi, calcular_ei, calcular_ns, rango_disponible, serie_mensual
+from inventario.servicios.indicadores import calcular_coi, calcular_ei, calcular_ns, rango_disponible, serie_mensual
 from inventario.models import (
     ConteoDetalle,
     ConteoFisico,

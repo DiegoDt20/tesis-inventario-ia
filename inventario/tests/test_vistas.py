@@ -7,7 +7,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import ConteoDetalle, ConteoFisico, Movimiento, Pedido, PedidoDetalle, Producto
+from ..models import ConteoDetalle, ConteoFisico, Movimiento, Pedido, PedidoDetalle, Producto
 
 
 def _crear_operador(username='operador1'):

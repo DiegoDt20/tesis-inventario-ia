@@ -11,7 +11,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import (
+from ..models import (
     ConteoDetalle,
     ConteoFisico,
     CostoAlmacenamiento,

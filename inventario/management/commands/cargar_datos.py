@@ -14,7 +14,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from inventario.indicadores import calcular_coi, calcular_ei, calcular_ns
+from inventario.servicios.indicadores import calcular_coi, calcular_ei, calcular_ns
 from inventario.models import (
     ConteoDetalle,
     ConteoFisico,
@@ -790,7 +790,7 @@ class Command(BaseCommand):
         """Calcula los tres indicadores desde la base de datos (no desde el
         Excel), para verificar que la importación no deformó los datos.
 
-        Usa inventario.indicadores (las mismas funciones que el dashboard),
+        Usa inventario.servicios.indicadores (las mismas funciones que el dashboard),
         para que nunca haya dos cálculos distintos del mismo indicador."""
         ei = calcular_ei(origen=origen)
         ns = calcular_ns(origen=origen)

@@ -19,7 +19,9 @@ from datetime import date, timedelta
 
 from django.db.models import Count, Sum
 
-from inventario.indicadores import calcular_coi, calcular_ei, calcular_ns, hay_mezcla_de_origenes, rango_disponible
+from inventario.servicios.indicadores import (
+    calcular_coi, calcular_ei, calcular_ns, hay_mezcla_de_origenes, rango_disponible,
+)
 from inventario.models import (
     Anomalia,
     Categoria,
