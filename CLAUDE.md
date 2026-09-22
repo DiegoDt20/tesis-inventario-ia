@@ -28,8 +28,14 @@ indicadores.
   `PedidoDetalle` no atendidos por completo, valorizados al margen
   (`precio_venta - costo_compra`) del producto (pérdidas por
   desabastecimiento). `calcular_coi()` (`inventario/servicios/indicadores.py`)
-  todavía **no** sustrae `Merma`: ese modelo registra pérdidas por deterioro,
-  vencimiento u obsolescencia pero no está incorporado a esta fórmula.
+  **no** lee el modelo `Merma` directamente. Las mermas ya entran al COI por
+  otra vía: `cargar_datos` (hoja `3_COI_CA`) carga el monto agregado
+  "Mermas del periodo" como una fila más de `CostoAlmacenamiento`, porque
+  esa hoja no trae el desglose por producto/cantidad que `Merma` exige. Si
+  algún día se quiere registrar mermas individuales en `Merma` y sumarlas al
+  COI, hay que dejar de cargarlas también como fila de
+  `CostoAlmacenamiento` (o restarlas de ahí): sumar ambas fuentes sin
+  ajustar ninguna cuenta la misma merma dos veces.
 
 ## Stack
 
@@ -113,13 +119,20 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     cero sobre el dataset externo. Fase 2 (`entrenar_fase_ajuste`): continúa
     el entrenamiento sobre datos internos vía `xgb_model=`, con menos
     árboles y learning rate más bajo. División train/test siempre TEMPORAL
-    (últimos N días como test); nunca `train_test_split` con shuffle.
+    (últimos N días como test, `--dias-test`); nunca `train_test_split` con
+    shuffle. El comando `entrenar_ajustado` rechaza una combinación de
+    histórico disponible y `--dias-test` que deje menos de
+    `MIN_DIAS_ENTRENAMIENTO` (14) días para entrenar — con poco histórico
+    interno (agosto 2026: 31 días), un `--dias-test` grande (el valor por
+    defecto es 30) deja casi todo el histórico como test y casi nada para
+    entrenar, lo que invalida la comparación de los tres modelos.
   - `evaluacion.py` — MAE, RMSE, MAPE, R²; compara línea base ingenua,
     modelo solo-interno y modelo preentrenado+ajustado sobre el mismo test
     interno, para demostrar si la transferencia aporta valor.
 - Modelos `ModeloEntrenado` (métricas, hiperparámetros, fase, archivo,
-  `activo`) y `Prediccion` (producto, fecha objetivo, demanda predicha/real,
-  modelo usado).
+  `activo`, y para la fase "ajustado" también `origen_datos_internos`,
+  `dias_entrenamiento` y `dias_prueba`) y `Prediccion` (producto, fecha
+  objetivo, demanda predicha/real, modelo usado).
 - Comandos: `entrenar_base`, `entrenar_ajustado`, `predecir_demanda --dias
   N`, `evaluar_predicciones`.
 - Los archivos de modelo entrenado (`.json` de XGBoost) se guardan en

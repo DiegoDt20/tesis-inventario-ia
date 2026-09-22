@@ -40,6 +40,10 @@
                 {% for error in form.cantidad.errors %}
                     <div class="text-danger small">{{ error }}</div>
                 {% endfor %}
+                <!-- Validación en vivo: avisa si esta salida deja el stock en
+                     negativo, antes de intentar guardar (Movimiento.clean()
+                     ya lo bloquea al guardar; esto solo adelanta el aviso). -->
+                <div id="aviso-stock"></div>
             </div>
 
             <div class="mb-3">

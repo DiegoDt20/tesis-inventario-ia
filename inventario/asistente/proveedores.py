@@ -7,6 +7,7 @@ que los datos de la microempresa nunca salgan del equipo. Agregar un
 proveedor externo más adelante implica solo una clase nueva aquí más una
 entrada en PROVEEDORES.
 """
+import json
 from abc import ABC, abstractmethod
 
 import requests
@@ -26,6 +27,15 @@ class ProveedorLLM(ABC):
         """`mensajes`: lista de dicts {'role': 'system'|'user'|'assistant',
         'content': str}. Devuelve el texto de la respuesta, o lanza
         ErrorProveedorLLM si el proveedor falla."""
+
+    @abstractmethod
+    def generar_respuesta_stream(self, mensajes):
+        """Igual que generar_respuesta, pero devuelve un generador que va
+        produciendo la respuesta en fragmentos de texto a medida que el
+        modelo los genera (para el asistente en tiempo real, ver
+        asistente.py:consultar_asistente_stream). Lanza ErrorProveedorLLM si
+        el proveedor falla, ya sea antes del primer fragmento o a mitad de
+        la generación."""
 
 
 class ProveedorOllama(ProveedorLLM):
@@ -53,6 +63,37 @@ class ProveedorOllama(ProveedorLLM):
         if not contenido:
             raise ErrorProveedorLLM('Ollama respondió sin contenido.')
         return contenido
+
+    def generar_respuesta_stream(self, mensajes):
+        # Con stream=True, Ollama devuelve un objeto JSON por línea (NDJSON):
+        # {"message": {"content": "frag"}, "done": false} ... {"done": true}.
+        # requests con stream=True no abre la conexión de red hasta el
+        # primer iter_lines(), así que un Ollama caído recién falla ahí, no
+        # en el post() (por eso el try envuelve todo el generador, no solo
+        # la llamada a requests.post).
+        hubo_contenido = False
+        try:
+            respuesta = requests.post(
+                f'{self.url}/api/chat',
+                json={'model': self.modelo, 'messages': mensajes, 'stream': True},
+                timeout=self.timeout, stream=True,
+            )
+            respuesta.raise_for_status()
+            for linea in respuesta.iter_lines():
+                if not linea:
+                    continue
+                fragmento = json.loads(linea)
+                contenido = (fragmento.get('message') or {}).get('content', '')
+                if contenido:
+                    hubo_contenido = True
+                    yield contenido
+                if fragmento.get('done'):
+                    break
+        except (requests.RequestException, ValueError) as error:
+            raise ErrorProveedorLLM(f'No se pudo contactar a Ollama en {self.url}: {error}') from error
+
+        if not hubo_contenido:
+            raise ErrorProveedorLLM('Ollama respondió sin contenido.')
 
 
 # Único lugar que hay que tocar para agregar un proveedor externo: una clase

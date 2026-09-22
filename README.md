@@ -195,7 +195,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `crear_grupos_permisos`  | Crea/actualiza los grupos "administrador" (acceso total) y "operador" (pedidos, movimientos y conteos, sin borrar). | —                                                                              |
 | `detectar_anomalias`     | Corre los detectores de anomalías de control de existencias y guarda registros `Anomalia`.                          | `--origen` (opcional)                                                         |
 | `entrenar_base`          | Fase 1: preentrena el motor de predicción con el dataset externo de Kaggle.                                          | `--archivo` (por defecto `datos/train.csv`), `--dias-test` (30)               |
-| `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`) |
+| `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. Falla si `--dias-test` dejaría menos de 14 días para entrenar. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`) |
 | `predecir_demanda`       | Genera predicciones de demanda diaria con el modelo ajustado activo (o el base si aún no hay ajustado).              | `--dias` (30), `--origen` (opcional)                                          |
 | `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas y calcula MAE, RMSE, SMAPE y R².                                 | —                                                                              |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
@@ -223,7 +223,7 @@ negocio.
 | `ConteoDetalle`        | `conteo` (FK), `producto` (FK), `stock_sistema`, `stock_fisico`, `diferencia` (calculado)                                     |
 | `Merma`                | `producto` (FK), `cantidad`, `motivo`, `costo_unitario`, `fecha`, `origen`                                                    |
 | `CostoAlmacenamiento`  | `periodo_mes`, `concepto`, `monto`, `origen`                                                                                  |
-| `ModeloEntrenado`      | `fecha_entrenamiento`, `fase` (base/ajustado), `nivel` (producto/categoria), `algoritmo`, `hiperparametros`, `mae`, `rmse`, `smape`, `r2`, `mae_linea_base`, `mae_solo_interno`, `n_registros_externos`, `n_registros_internos`, `origen_datos_internos`, `ruta_archivo`, `activo` |
+| `ModeloEntrenado`      | `fecha_entrenamiento`, `fase` (base/ajustado), `nivel` (producto/categoria), `algoritmo`, `hiperparametros`, `mae`, `rmse`, `smape`, `r2`, `mae_linea_base`, `mae_solo_interno`, `n_registros_externos`, `n_registros_internos`, `origen_datos_internos`, `dias_entrenamiento`, `dias_prueba`, `ruta_archivo`, `activo` |
 | `Prediccion`           | `producto` (FK), `fecha_generacion`, `fecha_objetivo`, `demanda_predicha`, `demanda_real`, `modelo` (FK a `ModeloEntrenado`), `nivel_prediccion`, `participacion_usada` |
 | `Recomendacion`        | `producto` (FK), `fecha_generacion`, `estado` (crítico/reponer/normal/exceso), `stock_actual_snapshot`, `demanda_predicha_periodo`, `desviacion_demanda`, `lead_time_usado`, `stock_seguridad`, `punto_reorden`, `cantidad_sugerida`, `nivel_servicio_objetivo`, `explicacion`, `aceptada`, `fecha_decision` |
 | `Anomalia`             | `producto` (FK), `fecha_deteccion`, `tipo`, `severidad`, `score`, `valor_observado`, `valor_esperado`, `descripcion`, `revisada`, `fecha_revision` |
@@ -253,14 +253,33 @@ almacenamiento y PD pérdidas por desabastecimiento.
 - **COI** — suma de `CostoAlmacenamiento.monto` en el periodo (costos de
   almacenamiento) más, por cada `PedidoDetalle` no atendido por completo,
   `(cantidad no atendida) × (precio_venta − costo_compra)` del producto
-  (pérdidas por desabastecimiento). `Merma` registra pérdidas por deterioro,
-  vencimiento u obsolescencia pero **no** se suma todavía al cálculo de COI
-  (ver corrección más abajo).
+  (pérdidas por desabastecimiento).
+
+  **Las mermas ya están dentro de esa suma**: `cargar_datos` (hoja
+  `3_COI_CA`) carga el monto agregado de "Mermas del periodo" como una fila
+  más de `CostoAlmacenamiento` (concepto `"Mermas del periodo — ..."`), no
+  como registros `Merma` uno por uno — el Excel de esa hoja no trae el
+  desglose por producto/cantidad que el modelo `Merma` exige. El modelo
+  `Merma` existe para si en el futuro se quiere registrar cada merma
+  individualmente (producto, cantidad, motivo, fecha), pero **si
+  `calcular_coi()` llegara a sumar también `Merma.cantidad × costo_unitario`
+  al COI, el monto de mermas quedaría contado dos veces**: una vez como fila
+  agregada de `CostoAlmacenamiento` y otra vez desglosada por `Merma`. Antes
+  de instrumentar `Merma` en el cálculo, hay que dejar de cargar "Mermas del
+  periodo" como fila de `CostoAlmacenamiento` (o restarla al construir el
+  monto de almacenamiento), no simplemente sumar las dos fuentes.
 
 ## Limitaciones
 
 - El histórico disponible es de 31 días; la literatura recomienda al menos 90 para series temporales.
-- El conjunto de prueba abarca 30 días, por lo que las métricas varían entre entrenamientos sucesivos.
+- Con solo 31 días, el conjunto de prueba no puede ser grande sin dejar muy
+  pocos días para entrenar: el modelo ajustado vigente usa `--dias-test 7`
+  (24 días de entrenamiento, 7 de prueba). El propio comando
+  `entrenar_ajustado` rechaza una combinación que deje menos de 14 días de
+  entrenamiento (`MIN_DIAS_ENTRENAMIENTO`), así que un `--dias-test` mayor
+  simplemente no corre con este histórico. Con tan pocos días en cualquiera
+  de los dos conjuntos, las métricas van a variar bastante entre
+  entrenamientos sucesivos.
 - El pronóstico por categoría no captura diferencias finas entre productos de una misma categoría.
 - Tres categorías quedan fuera del modelo por volumen insuficiente.
 - El detector de movimientos atípicos requiere al menos cinco movimientos previos por producto.

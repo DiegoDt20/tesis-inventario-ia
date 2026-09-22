@@ -46,6 +46,16 @@ class ModeloEntrenado(models.Model):
     origen_datos_internos = models.CharField(
         max_length=10, choices=Origen.choices, null=True, blank=True, db_index=True,
     )
+    # Solo aplican a fase="ajustado": cuántos días de los datos internos se
+    # usaron para entrenar y cuántos para el test temporal (dividir_temporal
+    # separa los últimos "dias_prueba" días; el resto es dias_entrenamiento).
+    # Null en los modelos "base" y en ajustados entrenados antes de que estos
+    # campos existieran. Se muestran en el dashboard porque un conjunto de
+    # prueba grande sobre un histórico corto puede dejar muy pocos días para
+    # entrenar y volver la comparación de los tres modelos poco confiable
+    # (ver MIN_DIAS_ENTRENAMIENTO en el comando entrenar_ajustado).
+    dias_entrenamiento = models.IntegerField(null=True, blank=True)
+    dias_prueba = models.IntegerField(null=True, blank=True)
     ruta_archivo = models.CharField(max_length=500)
     activo = models.BooleanField(default=True)
 

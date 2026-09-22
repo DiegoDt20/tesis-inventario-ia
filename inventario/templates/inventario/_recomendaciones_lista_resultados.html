@@ -1,0 +1,14 @@
+{% if pagina.object_list %}
+    {% for r in pagina %}
+        {% include 'inventario/_recomendacion_card.html' with r=r %}
+    {% endfor %}
+    {% include 'inventario/_paginacion.html' with hx_target='#zona-resultados-recomendaciones' %}
+{% else %}
+    <div class="card">
+        <div class="estado-vacio">
+            <i class="bi bi-check2-circle estado-vacio-icono"></i>
+            No hay recomendaciones generadas todavía.<br>
+            Pide a un administrador que corra <code>generar_recomendaciones</code> desde la línea de comandos.
+        </div>
+    </div>
+{% endif %}

@@ -34,7 +34,11 @@ def recomendaciones_lista(request):
         pagina = Paginator(qs, 25).get_page(request.GET.get('page'))
 
     contexto = {'pagina': pagina, 'fecha_generacion': ultima_fecha_generacion}
-    return render(request, 'inventario/recomendaciones_lista.html', contexto)
+    plantilla = (
+        'inventario/_recomendaciones_lista_resultados.html' if request.headers.get('HX-Request') == 'true'
+        else 'inventario/recomendaciones_lista.html'
+    )
+    return render(request, plantilla, contexto)
 
 
 @login_required
@@ -47,6 +51,12 @@ def recomendacion_decidir(request, pk):
         recomendacion.aceptada = accion == 'aceptar'
         recomendacion.fecha_decision = timezone.now()
         recomendacion.save(update_fields=['aceptada', 'fecha_decision'])
+        if request.headers.get('HX-Request') == 'true':
+            # La tarjeta ya se vuelve a pintar con el nuevo estado (aceptada/
+            # rechazada): eso es la confirmación, no hace falta un mensaje
+            # aparte que además quedaría "en cola" para la próxima carga
+            # completa de página.
+            return render(request, 'inventario/_recomendacion_card.html', {'r': recomendacion})
         messages.success(
             request,
             f'Recomendación de {recomendacion.producto.codigo} marcada como '

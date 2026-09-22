@@ -308,4 +308,11 @@ def dashboard(request):
         'top_productos': _top_productos_demanda(fecha_inicio, fecha_fin, origen),
         'motivos_no_atencion': _motivos_no_atencion(fecha_inicio, fecha_fin, origen),
     }
-    return render(request, 'inventario/dashboard.html', contexto)
+    # El formulario de filtros pide esta misma URL por HTMX y solo necesita
+    # la zona de resultados: la plantilla completa (con sidebar, etc.) sería
+    # trabajo de red y de parseo desperdiciado en cada filtro.
+    plantilla = (
+        'inventario/_dashboard_resultados.html' if request.headers.get('HX-Request') == 'true'
+        else 'inventario/dashboard.html'
+    )
+    return render(request, plantilla, contexto)

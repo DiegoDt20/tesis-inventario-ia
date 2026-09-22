@@ -19,6 +19,13 @@ ETIQUETAS_MODELOS = {
     'ajustado': 'Preentrenado + ajuste',
 }
 
+# Con menos días de entrenamiento que esto, el ajuste (y sobre todo la
+# comparación contra la línea base y contra "solo datos internos") deja de
+# ser confiable: XGBoost prácticamente memoriza esos pocos días en vez de
+# aprender un patrón. No es un número mágico exacto, pero por debajo de dos
+# semanas no hay ni un ciclo semanal completo que aprender.
+MIN_DIAS_ENTRENAMIENTO = 14
+
 
 class Command(BaseCommand):
     help = (
@@ -69,14 +76,20 @@ class Command(BaseCommand):
                 raise CommandError('No hay pedidos registrados para entrenar el ajuste.')
 
         n_dias = (df_interno['fecha'].max() - df_interno['fecha'].min()).days + 1
-        if n_dias <= dias_test:
+        dias_entrenamiento = n_dias - dias_test
+        if dias_entrenamiento < MIN_DIAS_ENTRENAMIENTO:
             raise CommandError(
-                f'Los datos internos solo cubren {n_dias} día(s); se necesitan más de '
-                f'{dias_test} para separar un conjunto de test temporal.'
+                f'Los datos internos cubren {n_dias} día(s); con --dias-test {dias_test} '
+                f'solo quedarían {dias_entrenamiento} día(s) para entrenar, menos de los '
+                f'{MIN_DIAS_ENTRENAMIENTO} mínimos. Usa un --dias-test más chico '
+                f'(por ejemplo, {max(n_dias - MIN_DIAS_ENTRENAMIENTO, 1)}) o espera a tener '
+                'más histórico interno.'
             )
 
         self.stdout.write(
-            f'Registros internos (origen={origen}): {len(df_interno):,}. Ajustando el modelo base...'
+            f'Registros internos (origen={origen}): {len(df_interno):,}. '
+            f'{dias_entrenamiento} día(s) de entrenamiento, {dias_test} día(s) de prueba. '
+            'Ajustando el modelo base...'
         )
         modelo, train, test, hiperparametros = entrenar_fase_ajuste(
             df_interno, modelo_base.ruta_archivo, dias_test=dias_test,
@@ -106,6 +119,8 @@ class Command(BaseCommand):
                 n_registros_externos=modelo_base.n_registros_externos,
                 n_registros_internos=len(df_interno),
                 origen_datos_internos=origen,
+                dias_entrenamiento=dias_entrenamiento,
+                dias_prueba=dias_test,
                 ruta_archivo=ruta,
                 activo=True,
             )
@@ -113,6 +128,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f'\nModelo ajustado (nivel {nivel}) guardado en {ruta} (ModeloEntrenado #{registro.pk}).'
         ))
+        self.stdout.write(
+            f'  Días de entrenamiento: {dias_entrenamiento} | Días de prueba: {dias_test}'
+        )
         self.stdout.write(f'  Filas de train: {len(train):,} | Filas de test: {len(test):,}')
         self.stdout.write(
             f'  Filas de test con demanda real cero: {comparacion["pct_demanda_cero"]:.1f}%'

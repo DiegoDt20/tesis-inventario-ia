@@ -11,57 +11,204 @@
 
 <div class="card mb-3">
     <div class="card-body">
-        {% if historial %}
-            <div class="chat-historial">
-                {% for turno in historial %}
-                    <div class="chat-mensaje chat-mensaje-usuario">
-                        <div class="chat-mensaje-etiqueta">Tú</div>
-                        <div class="chat-mensaje-cuerpo">{{ turno.pregunta }}</div>
-                    </div>
-                    <div class="chat-mensaje chat-mensaje-asistente {% if turno.fallo %}chat-mensaje-fallo{% endif %}">
-                        <div class="chat-mensaje-etiqueta">
-                            {% if turno.fallo %}
-                                <i class="bi bi-exclamation-triangle-fill"></i> Asistente (sin conexión con el modelo)
-                            {% else %}
-                                Asistente
-                            {% endif %}
-                        </div>
-                        <div class="chat-mensaje-cuerpo">{{ turno.respuesta|linebreaksbr }}</div>
-
-                        {% if turno.documentos %}
-                            <details class="chat-fuentes">
-                                <summary>Fuentes usadas ({{ turno.documentos|length }})</summary>
-                                <ul>
-                                    {% for doc in turno.documentos %}
-                                        <li><strong>{{ doc.tipo }}</strong>{% if doc.referencia_id %} #{{ doc.referencia_id }}{% endif %}: {{ doc.contenido }}</li>
-                                    {% endfor %}
-                                </ul>
-                            </details>
+        <div id="chat-vacio" class="estado-vacio" {% if historial %}style="display:none;"{% endif %}>
+            <i class="bi bi-chat-dots estado-vacio-icono"></i>
+            Todavía no hay conversación. Escribe una pregunta sobre stock, recomendaciones, anomalías o indicadores.
+        </div>
+        <div id="chat-historial" class="chat-historial" {% if not historial %}style="display:none;"{% endif %}>
+            {% for turno in historial %}
+                <div class="chat-mensaje chat-mensaje-usuario">
+                    <div class="chat-mensaje-etiqueta">Tú</div>
+                    <div class="chat-mensaje-cuerpo">{{ turno.pregunta }}</div>
+                </div>
+                <div class="chat-mensaje chat-mensaje-asistente {% if turno.fallo %}chat-mensaje-fallo{% endif %}">
+                    <div class="chat-mensaje-etiqueta">
+                        {% if turno.fallo %}
+                            <i class="bi bi-exclamation-triangle-fill"></i> Asistente (sin conexión con el modelo)
+                        {% else %}
+                            Asistente
                         {% endif %}
                     </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="estado-vacio">
-                <i class="bi bi-chat-dots estado-vacio-icono"></i>
-                Todavía no hay conversación. Escribe una pregunta sobre stock, recomendaciones, anomalías o indicadores.
-            </div>
-        {% endif %}
+                    <div class="chat-mensaje-cuerpo">{{ turno.respuesta|linebreaksbr }}</div>
+
+                    {% if turno.documentos %}
+                        <details class="chat-fuentes">
+                            <summary>Fuentes usadas ({{ turno.documentos|length }})</summary>
+                            <ul>
+                                {% for doc in turno.documentos %}
+                                    <li><strong>{{ doc.tipo }}</strong>{% if doc.referencia_id %} #{{ doc.referencia_id }}{% endif %}: {{ doc.contenido }}</li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
     </div>
 </div>
 
-<form method="post" action="{% url 'inventario:asistente_chat' %}" class="chat-form">
+<form method="post" action="{% url 'inventario:asistente_chat' %}" class="chat-form" id="form-chat">
     {% csrf_token %}
-    <input type="text" name="pregunta" class="form-control" placeholder="Escribe tu pregunta..." autocomplete="off" required autofocus>
-    <button type="submit" class="btn btn-primary"><i class="bi bi-send me-1"></i>Enviar</button>
+    <input type="text" name="pregunta" id="campo-pregunta" class="form-control"
+           placeholder="Escribe tu pregunta..." autocomplete="off" required autofocus>
+    <button type="submit" class="btn btn-primary" id="boton-enviar-chat">
+        <i class="bi bi-send me-1 icono-htmx"></i>
+        <span class="spinner-border spinner-border-sm" id="spinner-chat" style="display: none;" aria-hidden="true"></span>
+        Enviar
+    </button>
 </form>
 
-{% if historial %}
-    <form method="post" action="{% url 'inventario:asistente_limpiar' %}" class="mt-2">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-trash me-1"></i>Limpiar conversación
-        </button>
-    </form>
-{% endif %}
+<form method="post" action="{% url 'inventario:asistente_limpiar' %}" class="mt-2" id="form-limpiar-chat"
+      {% if not historial %}style="display:none;"{% endif %}>
+    {% csrf_token %}
+    <button type="submit" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-trash me-1"></i>Limpiar conversación
+    </button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    // Progresión: sin EventSource (navegador muy viejo, o JS bloqueado),
+    // el formulario se queda como <form method="post"> normal y sigue
+    // funcionando igual que antes (respuesta completa, sin streaming).
+    if (!window.EventSource) {
+        return;
+    }
+
+    const chatVacio = document.getElementById('chat-vacio');
+    const historialEl = document.getElementById('chat-historial');
+    const formulario = document.getElementById('form-chat');
+    const formularioLimpiar = document.getElementById('form-limpiar-chat');
+    const campoPregunta = document.getElementById('campo-pregunta');
+    const botonEnviar = document.getElementById('boton-enviar-chat');
+    const spinner = document.getElementById('spinner-chat');
+    const urlStream = '{% url "inventario:asistente_stream" %}';
+
+    function crearMensajeUsuario(pregunta) {
+        const el = document.createElement('div');
+        el.className = 'chat-mensaje chat-mensaje-usuario';
+        const etiqueta = document.createElement('div');
+        etiqueta.className = 'chat-mensaje-etiqueta';
+        etiqueta.textContent = 'Tú';
+        const cuerpo = document.createElement('div');
+        cuerpo.className = 'chat-mensaje-cuerpo';
+        cuerpo.textContent = pregunta;
+        el.append(etiqueta, cuerpo);
+        return el;
+    }
+
+    function crearMensajeAsistente() {
+        const el = document.createElement('div');
+        el.className = 'chat-mensaje chat-mensaje-asistente chat-mensaje-generando';
+        const etiqueta = document.createElement('div');
+        etiqueta.className = 'chat-mensaje-etiqueta';
+        etiqueta.textContent = 'Asistente';
+        const cuerpo = document.createElement('div');
+        cuerpo.className = 'chat-mensaje-cuerpo';
+        cuerpo.innerHTML = '<span class="puntos-escritura"><span></span><span></span><span></span></span>';
+        el.append(etiqueta, cuerpo);
+        return el;
+    }
+
+    function crearFuentes(documentos) {
+        const details = document.createElement('details');
+        details.className = 'chat-fuentes';
+        const summary = document.createElement('summary');
+        summary.textContent = `Fuentes usadas (${documentos.length})`;
+        const ul = document.createElement('ul');
+        documentos.forEach(function (doc) {
+            const li = document.createElement('li');
+            const strong = document.createElement('strong');
+            strong.textContent = doc.tipo;
+            li.append(strong);
+            let texto = doc.referencia_id ? ` #${doc.referencia_id}: ${doc.contenido}` : `: ${doc.contenido}`;
+            li.append(document.createTextNode(texto));
+            ul.appendChild(li);
+        });
+        details.append(summary, ul);
+        return details;
+    }
+
+    formulario.addEventListener('submit', function (evento) {
+        evento.preventDefault();
+        const pregunta = campoPregunta.value.trim();
+        if (!pregunta) {
+            return;
+        }
+
+        chatVacio.style.display = 'none';
+        historialEl.style.display = '';
+
+        const mensajeUsuario = crearMensajeUsuario(pregunta);
+        const mensajeAsistente = crearMensajeAsistente();
+        historialEl.append(mensajeUsuario, mensajeAsistente);
+        historialEl.scrollTop = historialEl.scrollHeight;
+
+        campoPregunta.value = '';
+        campoPregunta.disabled = true;
+        botonEnviar.disabled = true;
+        spinner.style.display = 'inline-block';
+
+        const cuerpo = mensajeAsistente.querySelector('.chat-mensaje-cuerpo');
+        let textoAcumulado = '';
+        let primerFragmento = true;
+
+        function terminar() {
+            campoPregunta.disabled = false;
+            botonEnviar.disabled = false;
+            spinner.style.display = 'none';
+            formularioLimpiar.style.display = '';
+            campoPregunta.focus();
+        }
+
+        const fuenteEventos = new EventSource(urlStream + '?pregunta=' + encodeURIComponent(pregunta));
+
+        fuenteEventos.addEventListener('fragmento', function (evento) {
+            const datos = JSON.parse(evento.data);
+            if (primerFragmento) {
+                mensajeAsistente.classList.remove('chat-mensaje-generando');
+                primerFragmento = false;
+            }
+            textoAcumulado += datos.texto;
+            // textContent, nunca innerHTML: el texto lo redacta el modelo de
+            // lenguaje y no debe poder inyectar HTML en la página.
+            cuerpo.textContent = textoAcumulado;
+            cuerpo.classList.add('cursor-generando');
+            historialEl.scrollTop = historialEl.scrollHeight;
+        });
+
+        fuenteEventos.addEventListener('fin', function (evento) {
+            const datos = JSON.parse(evento.data);
+            mensajeAsistente.classList.remove('chat-mensaje-generando');
+            cuerpo.classList.remove('cursor-generando');
+            if (datos.fallo) {
+                mensajeAsistente.classList.add('chat-mensaje-fallo');
+            }
+            cuerpo.textContent = datos.respuesta;
+            if (datos.documentos && datos.documentos.length) {
+                mensajeAsistente.appendChild(crearFuentes(datos.documentos));
+            }
+            historialEl.scrollTop = historialEl.scrollHeight;
+            fuenteEventos.close();
+            terminar();
+        });
+
+        fuenteEventos.onerror = function () {
+            // Sin evento 'fin' (el servidor se cayó, o la conexión SSE se
+            // cortó a mitad de camino): no se deja el indicador de
+            // "escribiendo" congelado para siempre.
+            mensajeAsistente.classList.remove('chat-mensaje-generando');
+            cuerpo.classList.remove('cursor-generando');
+            if (!textoAcumulado) {
+                mensajeAsistente.classList.add('chat-mensaje-fallo');
+                cuerpo.textContent = 'No se pudo conectar con el asistente. Intenta de nuevo.';
+            }
+            fuenteEventos.close();
+            terminar();
+        };
+    });
+})();
+</script>
 {% endblock %}

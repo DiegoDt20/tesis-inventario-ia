@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from ..forms import CompletarLineaPedidoForm, LineaPedidoFormSet, PedidoForm, etiqueta_producto
+from ..forms import CompletarLineaPedidoForm, LineaPedidoFormSet, PedidoForm, etiqueta_producto, evaluar_linea_pedido
 from ..models import Origen, Pedido, PedidoDetalle, Producto
 from ._comunes import _parsear_fecha, _parsear_origen
 
@@ -143,7 +143,11 @@ def pedido_lista(request):
         'estados': Pedido.Estado.choices,
         'querystring': _querystring_sin_pagina(request),
     }
-    return render(request, 'inventario/pedido_lista.html', contexto)
+    plantilla = (
+        'inventario/_pedido_lista_resultados.html' if request.headers.get('HX-Request') == 'true'
+        else 'inventario/pedido_lista.html'
+    )
+    return render(request, plantilla, contexto)
 
 
 @login_required
@@ -186,3 +190,23 @@ def pedido_completar_linea(request, detalle_id):
         messages.error(request, f'No se pudo actualizar la línea de {detalle.producto.codigo}. {errores}')
 
     return redirect(request.META.get('HTTP_REFERER') or reverse('inventario:pedido_lista'))
+
+
+@login_required
+def pedido_validar_linea(request):
+    """Fragmento HTMX: valida en vivo, línea por línea, la relación entre
+    cantidad solicitada y atendida (misma regla que evaluar_linea_pedido,
+    usada por LineaPedidoForm y CompletarLineaPedidoForm), antes de enviar
+    el formulario de pedido o de completar una línea desde el listado."""
+    try:
+        solicitada = int(request.GET.get('cantidad_solicitada', ''))
+    except ValueError:
+        return render(request, 'inventario/_aviso_validacion.html', {'aviso': None})
+
+    atendida_texto = request.GET.get('cantidad_atendida', '').strip()
+    atendida = int(atendida_texto) if atendida_texto.isdigit() else 0
+    motivo = request.GET.get('motivo_no_atencion', '')
+
+    error = evaluar_linea_pedido(solicitada, atendida, motivo)
+    aviso = error[1] if error else None
+    return render(request, 'inventario/_aviso_validacion.html', {'aviso': aviso})

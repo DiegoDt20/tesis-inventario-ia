@@ -48,6 +48,44 @@ ATRIBUTOS_BUSCADOR_PRODUCTO = {
     'placeholder': 'Código o nombre del producto', 'autocomplete': 'off',
 }
 
+# Los tres campos que MovimientoForm necesita para la validación en vivo de
+# stock (producto, tipo, cantidad) se incluyen entre sí con hx-include:
+# cambiar cualquiera de los tres vuelve a pedir /movimientos/validar/ con
+# los valores actuales de los otros dos. A nivel de módulo (no de clase)
+# porque MovimientoForm.Meta, al ser una clase anidada, no ve los nombres
+# del cuerpo de MovimientoForm.
+ATRIBUTOS_VALIDACION_STOCK = {
+    'hx-get': '/movimientos/validar/',
+    'hx-target': '#aviso-stock',
+    'hx-include': '#id_producto,#id_tipo,#id_cantidad',
+}
+
+# Validación en vivo de una línea de pedido (cantidad atendida vs.
+# solicitada): "closest .linea-pedido" incluye los tres campos de la MISMA
+# línea del formset (ver el wrapper en pedido_form.html), y "next
+# .aviso-linea" apunta al aviso de esa misma línea, sin depender del índice
+# del formset (form-0-, form-1-...).
+ATRIBUTOS_VALIDACION_LINEA_PEDIDO = {
+    'hx-get': '/pedidos/validar-linea/',
+    'hx-target': 'next .aviso-linea',
+    'hx-include': 'closest .linea-pedido',
+}
+
+
+def evaluar_linea_pedido(cantidad_solicitada, cantidad_atendida, motivo_no_atencion):
+    """Valida la relación entre cantidad solicitada y atendida de una línea
+    de pedido. Devuelve (campo, mensaje) si hay un problema, o None si está
+    bien. La usan LineaPedidoForm.clean(), CompletarLineaPedidoForm.clean()
+    y la validación en vivo de pedido_validar_linea (vista), para que las
+    tres nunca digan algo distinto sobre la misma línea."""
+    if cantidad_solicitada is None:
+        return None
+    if cantidad_atendida > cantidad_solicitada:
+        return ('cantidad_atendida', 'No puede ser mayor que la cantidad solicitada.')
+    if cantidad_atendida < cantidad_solicitada and not motivo_no_atencion:
+        return ('motivo_no_atencion', 'La cantidad atendida es menor que la solicitada: indica el motivo.')
+    return None
+
 
 class PedidoForm(forms.Form):
     """Cabecera del pedido (item.pedidos_detalle va aparte, en
@@ -75,11 +113,16 @@ class LineaPedidoForm(forms.Form):
     )
     cantidad_solicitada = forms.IntegerField(
         label='Cant. solicitada', min_value=1,
-        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control', **ATRIBUTOS_VALIDACION_LINEA_PEDIDO, 'hx-trigger': 'change',
+        }),
     )
     cantidad_atendida = forms.IntegerField(
         label='Cant. atendida', min_value=0, required=False, initial=0,
-        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+            **ATRIBUTOS_VALIDACION_LINEA_PEDIDO, 'hx-trigger': 'input changed delay:400ms, change',
+        }),
     )
     fecha_requerida = forms.DateField(
         label='Fecha requerida', required=False,
@@ -89,7 +132,9 @@ class LineaPedidoForm(forms.Form):
         label='Motivo si no se entregó todo',
         choices=[('', '—')] + list(PedidoDetalle.MotivoNoAtencion.choices),
         required=False,
-        widget=forms.Select(attrs={'class': 'form-select'}),
+        widget=forms.Select(attrs={
+            'class': 'form-select', **ATRIBUTOS_VALIDACION_LINEA_PEDIDO, 'hx-trigger': 'change',
+        }),
     )
 
     def clean_producto(self):
@@ -107,14 +152,9 @@ class LineaPedidoForm(forms.Form):
             atendida = 0
             cleaned['cantidad_atendida'] = atendida
 
-        if solicitada is not None:
-            if atendida > solicitada:
-                self.add_error('cantidad_atendida', 'No puede ser mayor que la cantidad solicitada.')
-            elif atendida < solicitada and not cleaned.get('motivo_no_atencion'):
-                self.add_error(
-                    'motivo_no_atencion',
-                    'La cantidad atendida es menor que la solicitada: indica el motivo.',
-                )
+        error = evaluar_linea_pedido(solicitada, atendida, cleaned.get('motivo_no_atencion'))
+        if error:
+            self.add_error(*error)
         return cleaned
 
 
@@ -147,14 +187,10 @@ class CompletarLineaPedidoForm(forms.Form):
     def clean(self):
         cleaned = super().clean()
         atendida = cleaned.get('cantidad_atendida')
-        if atendida is not None and self.cantidad_solicitada is not None:
-            if atendida > self.cantidad_solicitada:
-                self.add_error('cantidad_atendida', 'No puede ser mayor que la cantidad solicitada.')
-            elif atendida < self.cantidad_solicitada and not cleaned.get('motivo_no_atencion'):
-                self.add_error(
-                    'motivo_no_atencion',
-                    'La cantidad atendida es menor que la solicitada: indica el motivo.',
-                )
+        if atendida is not None:
+            error = evaluar_linea_pedido(self.cantidad_solicitada, atendida, cleaned.get('motivo_no_atencion'))
+            if error:
+                self.add_error(*error)
         return cleaned
 
 
@@ -165,7 +201,9 @@ class MovimientoForm(forms.ModelForm):
     Movimiento.clean())."""
     producto = forms.CharField(
         label='Producto',
-        widget=forms.TextInput(attrs=ATRIBUTOS_BUSCADOR_PRODUCTO),
+        widget=forms.TextInput(attrs={
+            **ATRIBUTOS_BUSCADOR_PRODUCTO, **ATRIBUTOS_VALIDACION_STOCK, 'hx-trigger': 'change, blur',
+        }),
     )
 
     class Meta:
@@ -173,8 +211,11 @@ class MovimientoForm(forms.ModelForm):
         fields = ['producto', 'tipo', 'cantidad', 'documento', 'motivo']
         labels = {'documento': 'Documento (opcional)', 'motivo': 'Motivo (opcional)'}
         widgets = {
-            'tipo': forms.Select(attrs={'class': 'form-select'}),
-            'cantidad': forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
+            'tipo': forms.Select(attrs={'class': 'form-select', **ATRIBUTOS_VALIDACION_STOCK, 'hx-trigger': 'change'}),
+            'cantidad': forms.NumberInput(attrs={
+                'class': 'form-control', 'min': 1,
+                **ATRIBUTOS_VALIDACION_STOCK, 'hx-trigger': 'input changed delay:400ms, change',
+            }),
             'documento': forms.TextInput(attrs={'class': 'form-control'}),
             'motivo': forms.TextInput(attrs={'class': 'form-control'}),
         }

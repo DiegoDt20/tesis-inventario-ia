@@ -13,8 +13,10 @@ urlpatterns = [
         'pedidos/lineas/<int:detalle_id>/completar/',
         pedidos.pedido_completar_linea, name='pedido_completar_linea',
     ),
+    path('pedidos/validar-linea/', pedidos.pedido_validar_linea, name='pedido_validar_linea'),
 
     path('movimientos/nuevo/', movimientos.movimiento_nuevo, name='movimiento_nuevo'),
+    path('movimientos/validar/', movimientos.movimiento_validar, name='movimiento_validar'),
 
     path('conteos/nuevo/', conteos.conteo_nuevo, name='conteo_nuevo'),
 
@@ -32,4 +34,5 @@ urlpatterns = [
 
     path('asistente/', asistente.asistente_chat, name='asistente_chat'),
     path('asistente/limpiar/', asistente.asistente_limpiar, name='asistente_limpiar'),
+    path('asistente/stream/', asistente.asistente_stream, name='asistente_stream'),
 ]

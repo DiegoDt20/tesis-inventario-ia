@@ -1,0 +1,55 @@
+{% load inventario_extras %}
+<div class="card mb-3 tarjeta-htmx" id="recomendacion-{{ r.pk }}" x-data="{ confirmandoRechazo: false }">
+    <div class="card-body">
+        <h6 class="mb-2 d-flex align-items-center flex-wrap gap-2">
+            {{ r.producto.codigo }} — {{ r.producto.nombre }}
+            <span class="badge-suave badge-suave-{{ r.estado|color_estado }}">
+                <i class="bi {{ r.estado|icono_estado }}"></i> {{ r.get_estado_display }}
+            </span>
+            {% if r.aceptada is True %}
+                <span class="badge-suave badge-suave-success"><i class="bi bi-check-circle-fill"></i> Aceptada</span>
+            {% elif r.aceptada is False %}
+                <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Rechazada</span>
+            {% endif %}
+        </h6>
+        <p class="mb-3">{{ r.explicacion }}</p>
+        {% if r.aceptada is None %}
+            <button type="button" class="btn btn-acento btn-sm"
+                    hx-post="{% url 'inventario:recomendacion_decidir' r.pk %}" hx-vals='{"accion": "aceptar"}'
+                    hx-target="#recomendacion-{{ r.pk }}" hx-swap="outerHTML"
+                    hx-indicator="#indicador-aceptar-{{ r.pk }}">
+                <i class="bi bi-check-lg me-1 icono-htmx"></i>
+                <span class="spinner-border spinner-htmx" id="indicador-aceptar-{{ r.pk }}" aria-hidden="true"></span>
+                Aceptar
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-sm" @click="confirmandoRechazo = true">
+                <i class="bi bi-x-lg me-1"></i>Rechazar
+            </button>
+
+            <div class="fondo-modal-confirmacion" x-show="confirmandoRechazo" x-cloak
+                 @keydown.escape.window="confirmandoRechazo = false">
+                <div class="modal-confirmacion" @click.outside="confirmandoRechazo = false">
+                    <div class="modal-confirmacion-titulo">
+                        <i class="bi bi-question-circle"></i> ¿Rechazar esta recomendación?
+                    </div>
+                    <p class="modal-confirmacion-cuerpo mb-0">
+                        {{ r.producto.codigo }} — {{ r.producto.nombre }} quedará marcada como rechazada.
+                        Puedes seguir viéndola en el historial de recomendaciones.
+                    </p>
+                    <div class="modal-confirmacion-acciones mt-3">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @click="confirmandoRechazo = false">
+                            Cancelar
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm"
+                                hx-post="{% url 'inventario:recomendacion_decidir' r.pk %}" hx-vals='{"accion": "rechazar"}'
+                                hx-target="#recomendacion-{{ r.pk }}" hx-swap="outerHTML"
+                                hx-indicator="#indicador-rechazar-{{ r.pk }}">
+                            <span class="spinner-border spinner-htmx" id="indicador-rechazar-{{ r.pk }}" aria-hidden="true"></span>
+                            Sí, rechazar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>

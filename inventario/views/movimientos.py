@@ -5,8 +5,8 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from ..forms import MovimientoForm, etiqueta_producto
-from ..models import Origen, Producto
+from ..forms import MovimientoForm, etiqueta_producto, resolver_producto
+from ..models import Movimiento, Origen, Producto
 
 
 @login_required
@@ -40,3 +40,26 @@ def movimiento_nuevo(request):
         'etiquetas_producto': [etiqueta_producto(p) for p in Producto.objects.filter(activo=True).order_by('nombre')],
     }
     return render(request, 'inventario/movimiento_form.html', contexto)
+
+
+@login_required
+def movimiento_validar(request):
+    """Fragmento HTMX: avisa en vivo si una salida dejaría el stock del
+    producto elegido en negativo, antes de que el operador intente guardar
+    (Movimiento.clean() ya lo impide al guardar; esto solo adelanta el
+    aviso). Reutiliza resolver_producto, el mismo buscador que el resto del
+    formulario, para no duplicar esa lógica."""
+    producto = resolver_producto(request.GET.get('producto', ''))
+    tipo = request.GET.get('tipo')
+    aviso = None
+    if producto and tipo == Movimiento.Tipo.SALIDA:
+        try:
+            cantidad = int(request.GET.get('cantidad', ''))
+        except ValueError:
+            cantidad = None
+        if cantidad is not None and cantidad > producto.stock_actual:
+            aviso = (
+                f'Esta salida dejaría el stock de {producto.codigo} en negativo: '
+                f'solo hay {producto.stock_actual} unidad(es) disponibles.'
+            )
+    return render(request, 'inventario/_aviso_validacion.html', {'aviso': aviso})

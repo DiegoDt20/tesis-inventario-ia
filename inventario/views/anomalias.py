@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
 from django.db.models import Case, IntegerField, When
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -34,7 +35,12 @@ def _anomalias_no_revisadas(origen):
 @permission_required('inventario.change_anomalia', raise_exception=True)
 def anomalias_lista(request):
     pagina = Paginator(_anomalias_no_revisadas(None), 25).get_page(request.GET.get('page'))
-    return render(request, 'inventario/anomalias_lista.html', {'pagina': pagina})
+    contexto = {'pagina': pagina}
+    plantilla = (
+        'inventario/_anomalias_lista_resultados.html' if request.headers.get('HX-Request') == 'true'
+        else 'inventario/anomalias_lista.html'
+    )
+    return render(request, plantilla, contexto)
 
 
 @login_required
@@ -45,5 +51,9 @@ def anomalia_marcar_revisada(request, pk):
     anomalia.revisada = True
     anomalia.fecha_revision = timezone.now()
     anomalia.save(update_fields=['revisada', 'fecha_revision'])
+    if request.headers.get('HX-Request') == 'true':
+        # Devuelve el cuerpo vacío: hx-swap="outerHTML swap:300ms" en la fila
+        # la desvanece y la quita del DOM (ya no aparece en "sin revisar").
+        return HttpResponse('')
     messages.success(request, 'Anomalía marcada como revisada.')
     return redirect('inventario:anomalias_lista')

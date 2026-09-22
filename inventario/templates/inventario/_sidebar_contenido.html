@@ -1,55 +1,73 @@
 {% comment %}
 Contenido de la barra lateral: se incluye dos veces (sidebar fija en
 escritorio y offcanvas en pantallas chicas) para no duplicar el menú.
+mostrar_toggle_colapsar (solo True en la versión de escritorio) agrega el
+botón que angosta la barra a solo íconos; sidebarColapsada vive en <body>
+(ver base.html).
 {% endcomment %}
 <div class="sidebar-logo">
-    <div class="marca">Almacén Pinturas <small>Gestión de inventario</small></div>
+    <div class="marca">
+        Almacén Pinturas <small class="etiqueta-colapsable">Gestión de inventario</small>
+    </div>
+    {% if mostrar_toggle_colapsar %}
+        <button type="button" class="btn-colapsar-sidebar" @click="sidebarColapsada = !sidebarColapsada"
+                :title="sidebarColapsada ? 'Expandir menú' : 'Colapsar menú'">
+            <i class="bi" :class="sidebarColapsada ? 'bi-chevron-double-right' : 'bi-chevron-double-left'"></i>
+        </button>
+    {% endif %}
 </div>
 
 <nav class="sidebar-nav nav flex-column">
     <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
-       href="{% url 'inventario:dashboard' %}">
-        <i class="bi bi-speedometer2"></i> Dashboard
+       href="{% url 'inventario:dashboard' %}" title="Dashboard">
+        <i class="bi bi-speedometer2"></i> <span class="etiqueta-colapsable">Dashboard</span>
     </a>
     <a class="nav-link {% if request.resolver_match.url_name == 'pedido_lista' or request.resolver_match.url_name == 'pedido_nuevo' %}active{% endif %}"
-       href="{% url 'inventario:pedido_lista' %}">
-        <i class="bi bi-cart3"></i> Pedidos
+       href="{% url 'inventario:pedido_lista' %}" title="Pedidos">
+        <i class="bi bi-cart3"></i> <span class="etiqueta-colapsable">Pedidos</span>
     </a>
     <a class="nav-link {% if request.resolver_match.url_name == 'movimiento_nuevo' %}active{% endif %}"
-       href="{% url 'inventario:movimiento_nuevo' %}">
-        <i class="bi bi-arrow-left-right"></i> Movimientos
+       href="{% url 'inventario:movimiento_nuevo' %}" title="Movimientos">
+        <i class="bi bi-arrow-left-right"></i> <span class="etiqueta-colapsable">Movimientos</span>
     </a>
     <a class="nav-link {% if request.resolver_match.url_name == 'conteo_nuevo' %}active{% endif %}"
-       href="{% url 'inventario:conteo_nuevo' %}">
-        <i class="bi bi-clipboard-check"></i> Conteos
+       href="{% url 'inventario:conteo_nuevo' %}" title="Conteos">
+        <i class="bi bi-clipboard-check"></i> <span class="etiqueta-colapsable">Conteos</span>
     </a>
     {% if perms.inventario.change_recomendacion %}
         <a class="nav-link {% if request.resolver_match.url_name == 'recomendaciones_lista' %}active{% endif %}"
-           href="{% url 'inventario:recomendaciones_lista' %}">
-            <i class="bi bi-lightbulb"></i> Recomendaciones
+           href="{% url 'inventario:recomendaciones_lista' %}" title="Recomendaciones">
+            <i class="bi bi-lightbulb"></i> <span class="etiqueta-colapsable">Recomendaciones</span>
         </a>
     {% endif %}
     {% if perms.inventario.change_anomalia %}
         <a class="nav-link {% if request.resolver_match.url_name == 'anomalias_lista' %}active{% endif %}"
-           href="{% url 'inventario:anomalias_lista' %}">
-            <i class="bi bi-exclamation-triangle"></i> Anomalías
+           href="{% url 'inventario:anomalias_lista' %}" title="Anomalías">
+            <i class="bi bi-exclamation-triangle"></i> <span class="etiqueta-colapsable">Anomalías</span>
         </a>
     {% endif %}
     <a class="nav-link {% if request.resolver_match.url_name == 'asistente_chat' %}active{% endif %}"
-       href="{% url 'inventario:asistente_chat' %}">
-        <i class="bi bi-chat-dots"></i> Asistente
+       href="{% url 'inventario:asistente_chat' %}" title="Asistente">
+        <i class="bi bi-chat-dots"></i> <span class="etiqueta-colapsable">Asistente</span>
     </a>
 </nav>
 
-<div class="sidebar-usuario">
-    <div class="avatar">{{ user.username|slice:':1'|upper }}</div>
-    <div class="flex-grow-1 overflow-hidden">
-        <div class="usuario-nombre">{{ user.username }}</div>
+<div class="sidebar-usuario" x-data="{ menuAbierto: false }" @click.outside="menuAbierto = false">
+    <button type="button" class="sidebar-usuario-disparador" @click="menuAbierto = !menuAbierto"
+            :aria-expanded="menuAbierto.toString()">
+        <div class="avatar">{{ user.username|slice:':1'|upper }}</div>
+        <div class="flex-grow-1 overflow-hidden etiqueta-colapsable">
+            <div class="usuario-nombre">{{ user.username }}</div>
+        </div>
+        <i class="bi bi-chevron-up etiqueta-colapsable menu-usuario-flecha" :class="{ 'girada': menuAbierto }"></i>
+    </button>
+    <div class="menu-usuario" x-show="menuAbierto" x-transition.duration.150ms x-cloak>
+        <div class="menu-usuario-detalle">Sesión iniciada como <strong>{{ user.username }}</strong></div>
+        <form method="post" action="{% url 'logout' %}" class="mb-0">
+            {% csrf_token %}
+            <button class="menu-usuario-item" type="submit">
+                <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+            </button>
+        </form>
     </div>
-    <form method="post" action="{% url 'logout' %}" class="mb-0">
-        {% csrf_token %}
-        <button class="btn btn-sm btn-link text-white-50 p-0" type="submit" title="Cerrar sesión">
-            <i class="bi bi-box-arrow-right fs-5"></i>
-        </button>
-    </form>
 </div>

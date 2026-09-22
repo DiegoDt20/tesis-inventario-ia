@@ -93,3 +93,61 @@ def consultar_asistente(pregunta, n_documentos=5):
         )
 
     return RespuestaAsistente(respuesta=respuesta, documentos=documentos)
+
+
+def consultar_asistente_stream(pregunta, n_documentos=5):
+    """Igual que consultar_asistente, pero para la pantalla de respuesta en
+    tiempo real (ver views/asistente.py:asistente_stream): en vez de
+    devolver un RespuestaAsistente ya armado, es un generador que va
+    produciendo eventos a medida que el modelo redacta.
+
+    Eventos que produce (dicts):
+      {'tipo': 'fragmento', 'texto': str} — un trozo más de la respuesta.
+      {'tipo': 'fin', 'respuesta': str, 'documentos': [...], 'fallo': bool}
+        — siempre el último evento, con el texto completo acumulado y las
+        fuentes, igual que RespuestaAsistente.
+
+    Igual que consultar_asistente, nunca deja de producir el evento 'fin':
+    una falla del proveedor de LLM se refleja en fallo=True, no en una
+    excepción, para que la pantalla pueda cerrar el turno de todos modos."""
+    documentos = recuperar_documentos(pregunta, n=n_documentos)
+
+    if not documentos:
+        mensaje = (
+            'Todavía no hay información indexada para responder preguntas. '
+            'Pide a un administrador que corra el comando "indexar_conocimiento".'
+        )
+        yield {'tipo': 'fragmento', 'texto': mensaje}
+        yield {'tipo': 'fin', 'respuesta': mensaje, 'documentos': [], 'fallo': False}
+        return
+
+    contexto = _construir_contexto(documentos)
+    pregunta_anonimizada = anonimizar_texto(pregunta)
+    mensajes = [
+        {'role': 'system', 'content': PROMPT_SISTEMA},
+        {'role': 'user', 'content': f'CONTEXTO:\n{contexto}\n\nPREGUNTA: {pregunta_anonimizada}'},
+    ]
+
+    texto_generado = []
+    try:
+        for fragmento in obtener_proveedor().generar_respuesta_stream(mensajes):
+            texto_generado.append(fragmento)
+            yield {'tipo': 'fragmento', 'texto': fragmento}
+    except ErrorProveedorLLM:
+        if texto_generado:
+            # Ya se alcanzó a mostrar algo antes de que el proveedor se
+            # cayera: no se reemplaza (se perdería lo ya visto), se avisa
+            # que la respuesta quedó cortada.
+            aviso = '\n\n[Se perdió la conexión con el servicio de IA a mitad de la respuesta.]'
+            yield {'tipo': 'fragmento', 'texto': aviso}
+            yield {
+                'tipo': 'fin', 'respuesta': ''.join(texto_generado) + aviso,
+                'documentos': documentos, 'fallo': True,
+            }
+        else:
+            mensaje = _mensaje_contexto_crudo(documentos)
+            yield {'tipo': 'fragmento', 'texto': mensaje}
+            yield {'tipo': 'fin', 'respuesta': mensaje, 'documentos': documentos, 'fallo': True}
+        return
+
+    yield {'tipo': 'fin', 'respuesta': ''.join(texto_generado), 'documentos': documentos, 'fallo': False}

@@ -58,7 +58,7 @@
                 </div>
             {% endif %}
             {% for linea in formset %}
-                <div class="row g-2 align-items-start border-bottom pb-2 mb-2">
+                <div class="row g-2 align-items-start border-bottom pb-2 mb-2 linea-pedido">
                     <div class="col-md-4">
                         {% if forloop.first %}<label class="form-label small mb-1">Producto</label>{% endif %}
                         {{ linea.producto }}
@@ -94,6 +94,10 @@
                             <div class="text-danger small">{{ error }}</div>
                         {% endfor %}
                     </div>
+                    <!-- Validación en vivo (atendida vs. solicitada): misma
+                         regla que el envío del formulario, solo que antes
+                         de enviarlo (ver evaluar_linea_pedido en forms.py). -->
+                    <div class="col-12 aviso-linea"></div>
                 </div>
             {% endfor %}
             <button type="submit" name="agregar_linea" value="1" class="btn btn-outline-secondary btn-sm mt-2">

@@ -1,0 +1,53 @@
+{% load inventario_extras %}
+{% if pagina.object_list %}
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>Producto</th>
+                        <th>Tipo</th>
+                        <th>Severidad</th>
+                        <th>Descripción</th>
+                        <th>Detectada</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in pagina %}
+                        <tr id="anomalia-{{ a.pk }}" class="tarjeta-htmx">
+                            <td>{{ a.producto.codigo }} — {{ a.producto.nombre }}</td>
+                            <td>{{ a.get_tipo_display }}</td>
+                            <td>
+                                <span class="badge-suave badge-suave-{{ a.severidad|color_estado }}">
+                                    <i class="bi {{ a.severidad|icono_estado }}"></i> {{ a.get_severidad_display }}
+                                </span>
+                            </td>
+                            <td>{{ a.descripcion }}</td>
+                            <td>{{ a.fecha_deteccion|date:'d/m/Y H:i' }}</td>
+                            <td>
+                                <button type="button" class="btn btn-outline-primary btn-sm"
+                                        hx-post="{% url 'inventario:anomalia_marcar_revisada' a.pk %}"
+                                        hx-target="#anomalia-{{ a.pk }}" hx-swap="outerHTML swap:300ms"
+                                        hx-indicator="#indicador-revisar-{{ a.pk }}">
+                                    <i class="bi bi-check2 me-1 icono-htmx"></i>
+                                    <span class="spinner-border spinner-htmx" id="indicador-revisar-{{ a.pk }}" aria-hidden="true"></span>
+                                    Marcar revisada
+                                </button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include 'inventario/_paginacion.html' with hx_target='#zona-resultados-anomalias' %}
+{% else %}
+    <div class="card">
+        <div class="estado-vacio">
+            <i class="bi bi-check2-circle estado-vacio-icono"></i>
+            No hay anomalías sin revisar.<br>
+            Pide a un administrador que corra <code>detectar_anomalias</code> desde la línea de comandos.
+        </div>
+    </div>
+{% endif %}

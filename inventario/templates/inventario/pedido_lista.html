@@ -14,7 +14,9 @@
     </a>
 </div>
 
-<form method="get" class="row g-2 align-items-end mb-3">
+<form class="row g-2 align-items-end mb-3"
+      hx-get="{% url 'inventario:pedido_lista' %}" hx-target="#zona-resultados-pedidos"
+      hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-indicator="#indicador-filtro-pedidos">
     <div class="col-auto">
         <label class="form-label small mb-0" for="fecha">Fecha</label>
         <input type="date" id="fecha" name="fecha" value="{{ fecha|date:'Y-m-d' }}" class="form-control form-control-sm">
@@ -29,113 +31,20 @@
         </select>
     </div>
     <div class="col-auto">
-        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Filtrar</button>
-        <a href="{% url 'inventario:pedido_lista' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg me-1"></i>Limpiar</a>
+        <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-funnel me-1 icono-htmx"></i>
+            <span class="spinner-border spinner-htmx" id="indicador-filtro-pedidos" aria-hidden="true"></span>
+            Filtrar
+        </button>
+        <a href="{% url 'inventario:pedido_lista' %}" class="btn btn-outline-secondary btn-sm"
+           hx-get="{% url 'inventario:pedido_lista' %}" hx-target="#zona-resultados-pedidos"
+           hx-swap="innerHTML swap:150ms" hx-push-url="true">
+            <i class="bi bi-x-lg me-1"></i>Limpiar
+        </a>
     </div>
 </form>
 
-{% if pagina.object_list %}
-    <div class="card">
-        <div class="table-responsive">
-            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
-                <thead>
-                    <tr>
-                        <th>N.°</th>
-                        <th>Fecha</th>
-                        <th>Cliente</th>
-                        <th>Producto</th>
-                        <th class="text-end">Solicitada</th>
-                        <th class="text-end">Atendida</th>
-                        <th>Requerida</th>
-                        <th>Atención</th>
-                        <th>Estado</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for detalle in pagina %}
-                        <tr {% if detalle.formulario_completar %}
-                                class="fila-expandible" data-bs-toggle="collapse"
-                                data-bs-target="#completar-{{ detalle.pk }}" aria-expanded="false"
-                            {% endif %}>
-                            <td>
-                                {% if detalle.formulario_completar %}<i class="bi bi-chevron-right"></i>{% endif %}
-                                {{ detalle.pedido.pk }}
-                            </td>
-                            <td>{{ detalle.pedido.fecha_solicitud|date:'d/m/Y' }}</td>
-                            <td>{{ detalle.pedido.cliente }}</td>
-                            <td>{{ detalle.producto.codigo }} — {{ detalle.producto.nombre }}</td>
-                            <td class="text-end">{{ detalle.cantidad_solicitada|floatformat:0 }}</td>
-                            <td class="text-end">{{ detalle.cantidad_atendida|floatformat:0 }}</td>
-                            <td>{{ detalle.fecha_requerida|date:'d/m/Y'|default:'—' }}</td>
-                            <td>
-                                {% if detalle.fecha_atencion %}
-                                    {{ detalle.fecha_atencion|date:'d/m/Y' }}
-                                    {% if detalle.cantidad_atendida >= detalle.cantidad_solicitada %}
-                                        <span class="badge-suave badge-suave-{{ detalle.atendido_a_tiempo|color_estado }}">
-                                            <i class="bi {{ detalle.atendido_a_tiempo|icono_estado }}"></i>
-                                            {% if detalle.atendido_a_tiempo %}A tiempo{% else %}Tarde{% endif %}
-                                        </span>
-                                    {% endif %}
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if detalle.cantidad_atendida >= detalle.cantidad_solicitada %}
-                                    <span class="badge-suave badge-suave-{{ 'atendido'|color_estado }}">
-                                        <i class="bi {{ 'atendido'|icono_estado }}"></i> Atendido
-                                    </span>
-                                {% else %}
-                                    <span class="badge-suave badge-suave-{{ 'pendiente'|color_estado }}">
-                                        <i class="bi {{ 'pendiente'|icono_estado }}"></i> Pendiente
-                                    </span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% if detalle.formulario_completar %}
-                            <tr class="collapse" id="completar-{{ detalle.pk }}">
-                                <td colspan="9" class="bg-body-tertiary">
-                                    <form method="post"
-                                          action="{% url 'inventario:pedido_completar_linea' detalle.pk %}"
-                                          class="d-flex gap-2 align-items-end flex-wrap py-2">
-                                        {% csrf_token %}
-                                        <div>
-                                            <label class="form-label small mb-0">Cantidad atendida</label>
-                                            {{ detalle.formulario_completar.cantidad_atendida }}
-                                        </div>
-                                        <div>
-                                            <label class="form-label small mb-0">Fecha de atención</label>
-                                            {{ detalle.formulario_completar.fecha_atencion }}
-                                        </div>
-                                        <div>
-                                            <label class="form-label small mb-0">Motivo si falta</label>
-                                            {{ detalle.formulario_completar.motivo_no_atencion }}
-                                        </div>
-                                        <button type="submit" class="btn btn-acento btn-sm">
-                                            <i class="bi bi-check-lg me-1"></i>Guardar
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% endif %}
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% include 'inventario/_paginacion.html' %}
-{% else %}
-    <div class="card">
-        <div class="estado-vacio">
-            <i class="bi bi-cart-x estado-vacio-icono"></i>
-            {% if fecha or estado %}
-                No hay pedidos que coincidan con ese filtro.
-                <a href="{% url 'inventario:pedido_lista' %}">Quita el filtro</a> para ver todos.
-            {% else %}
-                Todavía no hay pedidos registrados.
-                <a href="{% url 'inventario:pedido_nuevo' %}">Registra el primero</a>.
-            {% endif %}
-        </div>
-    </div>
-{% endif %}
+<div id="zona-resultados-pedidos" class="zona-resultados">
+    {% include 'inventario/_pedido_lista_resultados.html' %}
+</div>
 {% endblock %}
