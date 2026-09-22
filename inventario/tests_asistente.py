@@ -3,7 +3,7 @@ documentos relevantes, que la anonimización elimine los datos sensibles
 antes de enviarlos a la API del modelo de lenguaje, que el prompt del
 sistema fije el idioma, y que una falla del proveedor de LLM no rompa la
 pantalla del chat."""
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -15,11 +15,13 @@ from inventario.asistente import indexador, recuperador
 from inventario.asistente.anonimizador import anonimizar_texto
 from inventario.asistente.asistente import PROMPT_SISTEMA, consultar_asistente
 from inventario.asistente.proveedores import ErrorProveedorLLM
+from inventario.indicadores import calcular_ns, rango_disponible
 from inventario.models import (
     Categoria,
     ConsultaAsistente,
     DocumentoIndexado,
     Pedido,
+    PedidoDetalle,
     Producto,
     Recomendacion,
     TipoDocumento,
@@ -124,6 +126,95 @@ class RecuperadorPreguntaGeneralPriorizaResumenesTests(TestCase):
 
         self.assertIn(doc_recomendacion, resultados)
         self.assertNotIn(self.doc_producto, resultados)
+
+    def test_no_recorta_documentos_de_resumen_aunque_superen_n(self):
+        # Antes del ajuste, con n=2 uno de los tres documentos de resumen
+        # (p. ej. una categoría entera) podía quedar fuera solo por no ser
+        # de los "n" más cercanos por embedding.
+        doc_otra_categoria = DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.RESUMEN_CATEGORIA, referencia_id=None,
+            contenido='Resumen de la categoría Esmalte: 141 producto(s) activo(s), stock total de 2648 unidades.',
+            embedding=_vector(4),
+        )
+
+        with patch.object(recuperador, 'generar_embedding', return_value=_vector(0)):
+            resultados = recuperador.recuperar_documentos('resumen del negocio', n=2)
+
+        self.assertEqual(
+            set(resultados), {self.doc_resumen_categoria, doc_otra_categoria, self.doc_indicador},
+        )
+        self.assertEqual(len(resultados), 3)
+
+    def test_recorta_las_recomendaciones_criticas_a_un_maximo(self):
+        # El total exacto de críticas ya lo dice el resumen de estados;
+        # detallar decenas de productos críticos infla el contexto sin
+        # aportar más que el conteo.
+        lote = timezone.now()
+        for i in range(recuperador.MAX_RECOMENDACIONES_CRITICAS_DETALLE + 3):
+            producto = Producto.objects.create(
+                codigo=f'PIN-90{i}', nombre=f'Crítico {i}',
+                precio_venta='10.00', costo_compra='5.00', stock_actual=1,
+            )
+            recomendacion = Recomendacion.objects.create(
+                producto=producto, fecha_generacion=lote, estado=Recomendacion.Estado.CRITICO,
+                stock_actual_snapshot=1, demanda_predicha_periodo=10, desviacion_demanda=1,
+                lead_time_usado=7, stock_seguridad=5, punto_reorden=8, cantidad_sugerida=15,
+                nivel_servicio_objetivo=0.95, explicacion='x',
+            )
+            DocumentoIndexado.objects.create(
+                tipo=TipoDocumento.RECOMENDACION, referencia_id=recomendacion.pk,
+                contenido=f'Recomendación vigente para {producto.codigo} (Crítico): pedir 15 unidades.',
+                embedding=_vector(10 + i),
+            )
+
+        with patch.object(recuperador, 'generar_embedding', return_value=_vector(0)):
+            resultados = recuperador.recuperar_documentos('resumen del negocio', n=2)
+
+        documentos_recomendacion = [d for d in resultados if d.tipo == TipoDocumento.RECOMENDACION]
+        self.assertEqual(len(documentos_recomendacion), recuperador.MAX_RECOMENDACIONES_CRITICAS_DETALLE)
+
+
+class RecuperadorPreguntaSobreRecomendacionesIncluyeResumenEstadoTests(TestCase):
+    """Una pregunta sobre reposición que no dispara la rama "general" (no
+    contiene "resumen", "cómo va", etc.) debe de todos modos traer el
+    resumen de estados: sin el conteo de "no requieren reposición", el
+    modelo puede terminar inventando o calculando ese número por su cuenta
+    (se vio en la práctica: restó dos cifras sueltas del contexto)."""
+
+    def setUp(self):
+        self.doc_resumen_estado = DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.RESUMEN_ESTADO, referencia_id=None,
+            contenido=(
+                'Estado del catálogo según el último lote de recomendaciones: '
+                '2 en estado crítico, 1 para reponer, 10 no requieren reposición.'
+            ),
+            embedding=_vector(1),
+        )
+        self.doc_accionable = DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.RECOMENDACION, referencia_id=1,
+            contenido='Recomendación vigente para PIN-001 (Crítico): pedir 10 unidades.',
+            embedding=_vector(1),
+        )
+        # No debería aparecer en la pregunta de reposición (ni en la
+        # puntual, donde sí es la más cercana): no es una recomendación
+        # accionable ni el resumen de estados.
+        self.doc_producto = DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.PRODUCTO, referencia_id=2,
+            contenido='Producto PIN-002 — Latex Blanco. Stock actual: 40 unidades.',
+            embedding=_vector(0),
+        )
+
+    def test_pregunta_de_reposicion_sin_palabras_generales_incluye_el_resumen_de_estados(self):
+        with patch.object(recuperador, 'generar_embedding', return_value=_vector(0)):
+            resultados = recuperador.recuperar_documentos('¿qué debo reponer?', n=2)
+
+        self.assertIn(self.doc_resumen_estado, resultados)
+
+    def test_no_activa_la_rama_de_recomendaciones_si_no_se_menciona_el_tema(self):
+        with patch.object(recuperador, 'generar_embedding', return_value=_vector(0)):
+            resultados = recuperador.recuperar_documentos('¿cuánto stock tiene PIN-002?', n=1)
+
+        self.assertEqual(resultados, [self.doc_producto])
 
 
 class AnonimizacionTests(TestCase):
@@ -300,3 +391,99 @@ class IndexadorDocumentosResumenTests(TestCase):
 
         self.assertEqual(len(documentos), 1)
         self.assertIn('no hay anomalías', documentos[0][2])
+
+
+class IndexadorDocumentoIndicadoresUsaElRangoDelDashboardTests(TestCase):
+    """El documento de indicadores debe calcular EI/NS/COI con el mismo
+    rango de fechas y el mismo origen (sin filtrar) que ve el dueño al
+    abrir el dashboard sin tocar ningún filtro. Antes usaba una ventana fija
+    de 30 días, así que el mismo indicador podía dar dos valores distintos
+    según se consultara desde el dashboard o desde el asistente."""
+
+    def test_usa_el_rango_completo_disponible_no_una_ventana_fija_de_30_dias(self):
+        producto = Producto.objects.create(
+            codigo='PIN-500', nombre='Prod', precio_venta='10.00', costo_compra='5.00', stock_actual=10,
+        )
+        # Muy afuera de cualquier ventana de "últimos 30 días" respecto a
+        # hoy: si el documento usara esa ventana fija, este pedido (y el NS
+        # que depende de él) quedaría fuera del cálculo.
+        fecha_vieja = date.today() - timedelta(days=200)
+        pedido = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime.combine(fecha_vieja, datetime.min.time())),
+            cliente='Cliente de prueba', canal=Pedido.Canal.MOSTRADOR,
+        )
+        PedidoDetalle.objects.create(
+            pedido=pedido, producto=producto, cantidad_solicitada=10, cantidad_atendida=10,
+            atendido_a_tiempo=True,
+        )
+
+        documentos = indexador._documento_indicadores()
+        contenido = documentos[0][2]
+
+        fecha_minima, fecha_maxima = rango_disponible(origen=None)
+        ns_esperado = calcular_ns(fecha_minima, fecha_maxima)
+
+        self.assertIn(f'{fecha_minima:%d/%m/%Y}', contenido)
+        self.assertIn(f'{fecha_maxima:%d/%m/%Y}', contenido)
+        self.assertIn(f'{ns_esperado["valor"]:.1f}%', contenido)
+
+
+class IndexadorRecomendacionesAgrupaLasQueNoRequierenAccionTests(TestCase):
+    """Solo se indexa un documento por producto para las recomendaciones
+    accionables (crítico/reponer); las que no requieren nada quedan
+    contadas en el resumen agregado, no listadas una por una."""
+
+    def _crear_recomendacion(self, producto, estado, cantidad_sugerida, fecha_generacion):
+        return Recomendacion.objects.create(
+            producto=producto, fecha_generacion=fecha_generacion, estado=estado,
+            stock_actual_snapshot=producto.stock_actual, demanda_predicha_periodo=10,
+            desviacion_demanda=1, lead_time_usado=7, stock_seguridad=5, punto_reorden=8,
+            cantidad_sugerida=cantidad_sugerida, nivel_servicio_objetivo=0.95, explicacion='x',
+        )
+
+    def test_solo_indexa_las_recomendaciones_accionables(self):
+        # Mismo fecha_generacion para las tres: son del mismo lote (ver
+        # Recomendacion.fecha_generacion en models.py), igual que las
+        # produce "generar_recomendaciones" en una sola corrida.
+        lote = timezone.now()
+        producto_critico = Producto.objects.create(
+            codigo='PIN-030', nombre='Crítico', precio_venta='10.00', costo_compra='5.00', stock_actual=1,
+        )
+        producto_normal = Producto.objects.create(
+            codigo='PIN-031', nombre='Normal', precio_venta='10.00', costo_compra='5.00', stock_actual=100,
+        )
+        producto_exceso = Producto.objects.create(
+            codigo='PIN-032', nombre='Exceso', precio_venta='10.00', costo_compra='5.00', stock_actual=500,
+        )
+        self._crear_recomendacion(producto_critico, Recomendacion.Estado.CRITICO, 15, lote)
+        self._crear_recomendacion(producto_normal, Recomendacion.Estado.NORMAL, 0, lote)
+        self._crear_recomendacion(producto_exceso, Recomendacion.Estado.EXCESO, 0, lote)
+
+        documentos = indexador._documentos_recomendacion()
+
+        self.assertEqual(len(documentos), 1)
+        tipo, referencia_id, contenido = documentos[0]
+        self.assertEqual(tipo, TipoDocumento.RECOMENDACION)
+        self.assertIn('PIN-030', contenido)
+        self.assertIn('15 unidades', contenido)
+        self.assertNotIn('PIN-031', contenido)
+        self.assertNotIn('PIN-032', contenido)
+
+    def test_resumen_estado_agrupa_los_que_no_requieren_reposicion(self):
+        lote = timezone.now()
+        producto_normal = Producto.objects.create(
+            codigo='PIN-033', nombre='Normal', precio_venta='10.00', costo_compra='5.00', stock_actual=100,
+        )
+        producto_exceso = Producto.objects.create(
+            codigo='PIN-034', nombre='Exceso', precio_venta='10.00', costo_compra='5.00', stock_actual=500,
+        )
+        self._crear_recomendacion(producto_normal, Recomendacion.Estado.NORMAL, 0, lote)
+        self._crear_recomendacion(producto_exceso, Recomendacion.Estado.EXCESO, 0, lote)
+
+        documentos = indexador._documento_resumen_estado()
+
+        self.assertEqual(len(documentos), 1)
+        contenido = documentos[0][2]
+        self.assertIn('2 no requieren reposición', contenido)
+        self.assertIn('1 en estado normal', contenido)
+        self.assertIn('1 en exceso de stock', contenido)

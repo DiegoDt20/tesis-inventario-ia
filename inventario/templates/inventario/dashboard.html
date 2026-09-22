@@ -514,6 +514,17 @@
                         <dd class="col-6">
                             {% if estado_modelo.dias_historico %}{{ estado_modelo.dias_historico }} días{% else %}Sin datos{% endif %}
                         </dd>
+
+                        {% if estado_modelo.modelo.fase == 'ajustado' %}
+                            <dt class="col-6">Origen de los datos de ajuste</dt>
+                            <dd class="col-6">
+                                {% if estado_modelo.modelo.origen_datos_internos %}
+                                    {{ estado_modelo.modelo.get_origen_datos_internos_display }}
+                                {% else %}
+                                    <span class="text-muted">No registrado</span>
+                                {% endif %}
+                            </dd>
+                        {% endif %}
                     </dl>
                     {% if estado_modelo.fuente_metricas %}
                         <div class="alert {% if estado_modelo.modelo.fase == 'base' %}alert-warning{% else %}alert-info{% endif %} small mt-3 mb-0 py-2">

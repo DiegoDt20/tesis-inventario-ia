@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 from django.db.models import Count, Sum
 
-from inventario.indicadores import calcular_coi, calcular_ei, calcular_ns
+from inventario.indicadores import calcular_coi, calcular_ei, calcular_ns, hay_mezcla_de_origenes, rango_disponible
 from inventario.models import (
     Anomalia,
     Categoria,
@@ -33,9 +33,10 @@ from inventario.models import (
 
 from .embeddings import generar_embedding
 
-# Ventana usada tanto para "demanda reciente" en la ficha de producto como
-# para los indicadores del periodo: suficiente para dar contexto sin
-# depender de todo el histórico.
+# Ventana usada para "demanda reciente" en la ficha de producto. No se usa
+# para el documento de indicadores: ese usa el mismo rango sin filtrar que
+# el dashboard (ver _documento_indicadores), para que el mismo indicador no
+# dé dos valores distintos según dónde se consulte.
 DIAS_PERIODO_RECIENTE = 30
 
 
@@ -62,20 +63,32 @@ def _documentos_producto():
     return documentos
 
 
+# Estados que sí requieren que alguien haga algo. Los otros (normal,
+# exceso) no se indexan uno por uno: quedan agrupados en un conteo dentro
+# de _documento_resumen_estado, para que una pregunta por las
+# recomendaciones no las liste todas repitiendo "no hace falta pedir".
+ESTADOS_ACCIONABLES = (Recomendacion.Estado.CRITICO, Recomendacion.Estado.REPONER)
+
+
 def _documentos_recomendacion():
-    """Solo las del último lote generado (las "vigentes"): un lote viejo ya
-    no refleja el estado actual del inventario."""
+    """Solo las del último lote generado (las "vigentes": un lote viejo ya
+    no refleja el estado actual del inventario), y solo las que requieren
+    una acción (crítico o para reponer). Las que no la requieren se cuentan
+    agrupadas en _documento_resumen_estado en vez de indexarse una por una."""
     ultima_fecha = (
         Recomendacion.objects.order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
     )
     if ultima_fecha is None:
         return []
     documentos = []
-    for recomendacion in Recomendacion.objects.filter(fecha_generacion=ultima_fecha).select_related('producto'):
+    recomendaciones = Recomendacion.objects.filter(
+        fecha_generacion=ultima_fecha, estado__in=ESTADOS_ACCIONABLES,
+    ).select_related('producto')
+    for recomendacion in recomendaciones:
         contenido = (
             f'Recomendación vigente para {recomendacion.producto.codigo} — '
-            f'{recomendacion.producto.nombre} ({recomendacion.get_estado_display()}): '
-            f'{recomendacion.explicacion}'
+            f'{recomendacion.producto.nombre} ({recomendacion.get_estado_display()}): pedir '
+            f'{recomendacion.cantidad_sugerida:.0f} unidades. {recomendacion.explicacion}'
         )
         documentos.append((TipoDocumento.RECOMENDACION, recomendacion.pk, contenido))
     return documentos
@@ -93,11 +106,20 @@ def _documentos_anomalia():
 
 
 def _documento_indicadores():
+    """Mismo cálculo, mismo rango de fechas y mismo origen (sin filtrar) que
+    ve el dueño al abrir el dashboard sin tocar ningún filtro: si acá se
+    usara una ventana distinta (p. ej. "últimos 30 días" fijo), el mismo
+    indicador daría un número distinto según se consulte desde el dashboard
+    o desde el asistente, lo cual no tiene sentido para un solo indicador.
+    """
+    fecha_minima, fecha_maxima = rango_disponible(origen=None)
     hoy = date.today()
-    desde = hoy - timedelta(days=DIAS_PERIODO_RECIENTE)
-    ei = calcular_ei(desde, hoy)
-    ns = calcular_ns(desde, hoy)
-    coi = calcular_coi(desde, hoy)
+    fecha_fin = fecha_maxima or hoy
+    fecha_inicio = fecha_minima or fecha_fin
+
+    ei = calcular_ei(fecha_inicio, fecha_fin)
+    ns = calcular_ns(fecha_inicio, fecha_fin)
+    coi = calcular_coi(fecha_inicio, fecha_fin)
 
     texto_ei = (
         f'Exactitud del inventario (EI): {ei["valor"]:.1f}%.' if ei['valor'] is not None
@@ -111,10 +133,15 @@ def _documento_indicadores():
         f'Costos operativos de inventario (COI): S/ {coi["valor"]:.2f}.' if coi['tiene_datos']
         else 'Costos operativos de inventario (COI): sin datos en el periodo.'
     )
+    texto_mezcla = (
+        ' Advertencia: este cálculo mezcla datos de prueba y datos reales.'
+        if hay_mezcla_de_origenes() else ''
+    )
 
     contenido = (
-        f'Indicadores del periodo {desde:%d/%m/%Y} al {hoy:%d/%m/%Y}: '
-        f'{texto_ei} {texto_ns} {texto_coi}'
+        f'Indicadores del periodo {fecha_inicio:%d/%m/%Y} al {fecha_fin:%d/%m/%Y} '
+        f'(el mismo rango completo que muestra el dashboard sin filtros aplicados): '
+        f'{texto_ei} {texto_ns} {texto_coi}{texto_mezcla}'
     )
     return [(TipoDocumento.INDICADOR, None, contenido)]
 
@@ -175,14 +202,19 @@ def _documento_resumen_estado():
     for fila in filas:
         conteos[fila['estado']] = fila['total']
     total = sum(conteos.values())
+    # Ya sumado acá para que el modelo de lenguaje no tenga que calcular
+    # "normal + exceso" por su cuenta al responder cuántos productos no
+    # requieren reposición (ver ESTADOS_ACCIONABLES en _documentos_recomendacion).
+    sin_reposicion = conteos[Recomendacion.Estado.NORMAL] + conteos[Recomendacion.Estado.EXCESO]
 
     contenido = (
         f'Estado del catálogo según el último lote de recomendaciones ({ultima_fecha:%d/%m/%Y}), '
         f'de {total} producto(s) evaluado(s): '
         f'{conteos[Recomendacion.Estado.CRITICO]} en estado crítico, '
         f'{conteos[Recomendacion.Estado.REPONER]} para reponer, '
-        f'{conteos[Recomendacion.Estado.NORMAL]} en estado normal, '
-        f'{conteos[Recomendacion.Estado.EXCESO]} en exceso de stock.'
+        f'{sin_reposicion} no requieren reposición '
+        f'({conteos[Recomendacion.Estado.NORMAL]} en estado normal y '
+        f'{conteos[Recomendacion.Estado.EXCESO]} en exceso de stock).'
     )
     return [(TipoDocumento.RESUMEN_ESTADO, None, contenido)]
 

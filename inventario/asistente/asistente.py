@@ -25,7 +25,13 @@ PROMPT_SISTEMA = (
     'cuenta: todos los números del contexto ya fueron calculados por el '
     'sistema. Si la pregunta requiere un dato que no aparece en el '
     'contexto, responde exactamente que no cuentas con ese dato en vez de '
-    'estimarlo o suponerlo. Responde de forma breve y clara.'
+    'estimarlo o suponerlo. Responde de forma breve y clara.\n\n'
+    'Si te preguntan por recomendaciones de reposición, NO enumeres '
+    'producto por producto los que no requieren reposición: el contexto ya '
+    'trae ese conteo agregado (por ejemplo "N no requieren reposición"), '
+    'úsalo tal cual. Detalla individualmente solo los productos que sí '
+    'requieren una acción (crítico o para reponer), con su cantidad '
+    'sugerida.'
 )
 
 

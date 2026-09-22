@@ -465,6 +465,13 @@ class ModeloEntrenado(models.Model):
     mae_solo_interno = models.FloatField(null=True, blank=True)
     n_registros_externos = models.IntegerField(default=0)
     n_registros_internos = models.IntegerField(default=0)
+    # Solo aplica a fase="ajustado": origen de los pedidos internos usados
+    # para el ajuste (prueba/real). Null en los modelos "base" (no usan
+    # datos internos) y en modelos ajustados entrenados antes de que este
+    # campo existiera.
+    origen_datos_internos = models.CharField(
+        max_length=10, choices=Origen.choices, null=True, blank=True, db_index=True,
+    )
     ruta_archivo = models.CharField(max_length=500)
     activo = models.BooleanField(default=True)
 

@@ -130,7 +130,13 @@ def _estado_modelo_activo(origen):
             '(Store Item Demand Forecasting Challenge), no sobre datos de la microempresa.'
         )
     elif modelo and modelo.fase == ModeloEntrenado.Fase.AJUSTADO:
-        fuente_metricas = 'Estas métricas se midieron sobre los datos internos de la microempresa.'
+        if modelo.origen_datos_internos:
+            fuente_metricas = (
+                'Estas métricas se midieron sobre los datos internos de la microempresa '
+                f'(origen: {modelo.get_origen_datos_internos_display()}).'
+            )
+        else:
+            fuente_metricas = 'Estas métricas se midieron sobre los datos internos de la microempresa.'
 
     return {'modelo': modelo, 'dias_historico': dias_historico, 'fuente_metricas': fuente_metricas}
 

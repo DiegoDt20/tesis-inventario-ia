@@ -11,7 +11,7 @@ from inventario.ml.carga_interna import (
 )
 from inventario.ml.entrenamiento import entrenar_fase_ajuste, guardar_modelo
 from inventario.ml.evaluacion import comparar_modelos
-from inventario.models import ModeloEntrenado, NivelPrediccion
+from inventario.models import ModeloEntrenado, NivelPrediccion, Origen
 
 ETIQUETAS_MODELOS = {
     'linea_base': 'Línea base ingenua',
@@ -30,8 +30,12 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--origen', default=None,
-            help='Filtra los pedidos usados por origen (prueba/real). Por defecto usa todos.',
+            '--origen', default=Origen.REAL, choices=Origen.values,
+            help=(
+                'Origen de los pedidos internos usados para el ajuste (prueba/real). '
+                'Por defecto "real": los datos de prueba son solo para desarrollo y '
+                'no deben mezclarse con el modelo que se evalúa en el postest.'
+            ),
         )
         parser.add_argument(
             '--dias-test', type=int, default=30,
@@ -71,7 +75,9 @@ class Command(BaseCommand):
                 f'{dias_test} para separar un conjunto de test temporal.'
             )
 
-        self.stdout.write(f'Registros internos: {len(df_interno):,}. Ajustando el modelo base...')
+        self.stdout.write(
+            f'Registros internos (origen={origen}): {len(df_interno):,}. Ajustando el modelo base...'
+        )
         modelo, train, test, hiperparametros = entrenar_fase_ajuste(
             df_interno, modelo_base.ruta_archivo, dias_test=dias_test,
         )
@@ -99,6 +105,7 @@ class Command(BaseCommand):
                 mae_solo_interno=comparacion['solo_interno']['mae'],
                 n_registros_externos=modelo_base.n_registros_externos,
                 n_registros_internos=len(df_interno),
+                origen_datos_internos=origen,
                 ruta_archivo=ruta,
                 activo=True,
             )
