@@ -1,0 +1,130 @@
+{% comment %}
+Tarjeta del gráfico de predicción de demanda: línea continua para el
+histórico real y punteada + sombreada para el pronóstico. Se recarga sola
+(id="tarjeta-grafico-prediccion") cuando cambia el producto elegido, sin
+tocar el resto del dashboard — ver dashboard_grafico_prediccion en
+views/dashboard.py.
+{% endcomment %}
+<div class="card mb-4" id="tarjeta-grafico-prediccion">
+    <div class="card-body">
+        <div class="grafico-cabecera">
+            <div>
+                <h6 class="card-title mb-1"><i class="bi bi-graph-up-arrow me-1"></i> Predicción de demanda</h6>
+                {% if producto_grafico %}
+                    <p class="text-muted small mb-0">{{ producto_grafico.codigo }} — {{ producto_grafico.nombre }} {{ producto_grafico.presentacion }}</p>
+                {% endif %}
+            </div>
+            {% if productos_prediccion %}
+                <select class="form-select form-select-sm grafico-selector" name="producto_grafico"
+                        hx-get="{% url 'inventario:dashboard_grafico_prediccion' %}" hx-include="#origen"
+                        hx-target="#tarjeta-grafico-prediccion" hx-swap="outerHTML swap:150ms">
+                    {% for p in productos_prediccion %}
+                        <option value="{{ p.pk }}" {% if producto_grafico.pk == p.pk %}selected{% endif %}>
+                            {{ p.codigo }} — {{ p.nombre }} {{ p.presentacion }}
+                        </option>
+                    {% endfor %}
+                </select>
+            {% endif %}
+        </div>
+
+        {% if grafico_prediccion %}
+            <div class="lienzo-grafico-grande">
+                <canvas id="grafico-prediccion-demanda"></canvas>
+            </div>
+            <div class="grafico-leyenda-corte">
+                <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea"></span> Histórico real</span>
+                {% if grafico_prediccion.hay_pronostico %}
+                    <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea punteada"></span> Pronóstico</span>
+                    <span>Corte: {{ grafico_prediccion.fecha_corte|date:'d/m/Y' }}</span>
+                {% else %}
+                    <span>Todavía no hay un pronóstico generado para este producto. Corre <code>predecir_demanda</code>.</span>
+                {% endif %}
+            </div>
+            <script>
+                (function () {
+                    const datos = {{ grafico_prediccion.puntos_json|safe }};
+                    const etiquetas = datos.map(function (p) { return p.fecha; });
+                    let indiceCorte = datos.findIndex(function (p) { return p.pronostico !== null; });
+                    if (indiceCorte === -1) {
+                        indiceCorte = datos.length;
+                    }
+
+                    const valoresHistorico = datos.map(function (p, i) { return i < indiceCorte ? p.real : null; });
+                    const valoresPronostico = datos.map(function (p, i) {
+                        if (i < indiceCorte - 1) return null;
+                        if (i === indiceCorte - 1) return p.real;
+                        return p.pronostico;
+                    });
+
+                    Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+                    Chart.defaults.font.size = 12;
+                    Chart.defaults.color = 'rgba(26, 36, 57, 0.6)';
+
+                    const colorAcento = '#2f6fe0';
+
+                    new Chart(document.getElementById('grafico-prediccion-demanda'), {
+                        type: 'line',
+                        data: {
+                            labels: etiquetas,
+                            datasets: [
+                                {
+                                    label: 'Histórico real',
+                                    data: valoresHistorico,
+                                    borderColor: colorAcento,
+                                    backgroundColor: 'rgba(47, 111, 224, 0.12)',
+                                    fill: true,
+                                    tension: 0.3,
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                },
+                                {
+                                    label: 'Pronóstico',
+                                    data: valoresPronostico,
+                                    borderColor: colorAcento,
+                                    backgroundColor: 'rgba(47, 111, 224, 0.06)',
+                                    borderDash: [6, 4],
+                                    fill: true,
+                                    tension: 0.3,
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                },
+                            ],
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: {mode: 'index', intersect: false},
+                            animation: {duration: 700, easing: 'easeOutQuart'},
+                            plugins: {
+                                legend: {display: false},
+                                tooltip: {
+                                    usePointStyle: true,
+                                    backgroundColor: '#101a2c',
+                                    titleColor: '#fff',
+                                    bodyColor: 'rgba(255, 255, 255, 0.85)',
+                                    padding: 10,
+                                    cornerRadius: 8,
+                                    displayColors: false,
+                                },
+                            },
+                            scales: {
+                                x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 8}},
+                                y: {
+                                    beginAtZero: true,
+                                    border: {display: false},
+                                    grid: {color: 'rgba(15, 23, 42, 0.06)'},
+                                },
+                            },
+                        },
+                    });
+                })();
+            </script>
+        {% else %}
+            <div class="estado-vacio-discreto mb-0">
+                Todavía no hay predicciones generadas para ningún producto. Corre <code>predecir_demanda</code>.
+            </div>
+        {% endif %}
+    </div>
+</div>

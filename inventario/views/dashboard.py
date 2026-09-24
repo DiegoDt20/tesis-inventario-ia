@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Case, Count, IntegerField, Max, Min, Sum, When
 from django.shortcuts import render
 
-from ..models import Anomalia, Categoria, ModeloEntrenado, PedidoDetalle, Producto, Recomendacion
+from ..models import Anomalia, Categoria, ModeloEntrenado, PedidoDetalle, Prediccion, Producto, Recomendacion
 from ..servicios.indicadores import (
     calcular_coi,
     calcular_ei,
@@ -236,17 +236,110 @@ def _motivos_no_atencion(fecha_inicio, fecha_fin, origen):
     return {'total': total, 'filas': filas}
 
 
+def _productos_con_prediccion(origen):
+    """Productos que tienen al menos una Prediccion guardada, para el
+    selector del gráfico de predicción de demanda del dashboard."""
+    qs = Producto.objects.filter(predicciones__isnull=False)
+    if origen:
+        qs = qs.filter(origen=origen)
+    return list(qs.distinct().order_by('nombre'))
+
+
+def _elegir_producto_grafico(productos_prediccion, producto_id, top_productos):
+    """El producto a mostrar en el gráfico: el pedido explícitamente por
+    query string si es válido; si no, el de mayor demanda del periodo que
+    tenga predicción; si ninguno la tiene, el primero de la lista."""
+    if not productos_prediccion:
+        return None
+    if producto_id:
+        coincidencia = next((p for p in productos_prediccion if str(p.pk) == producto_id), None)
+        if coincidencia:
+            return coincidencia
+    codigos_top = [f['producto__codigo'] for f in top_productos]
+    for codigo in codigos_top:
+        coincidencia = next((p for p in productos_prediccion if p.codigo == codigo), None)
+        if coincidencia:
+            return coincidencia
+    return productos_prediccion[0]
+
+
+def grafico_prediccion_demanda(producto, origen):
+    """Serie diaria de demanda real (PedidoDetalle.cantidad_solicitada, la
+    misma fuente que usa el motor de predicción) más el pronóstico del
+    último lote de Prediccion del producto, para el gráfico de predicción
+    de demanda del dashboard. Real y pronóstico nunca se mezclan en el
+    mismo punto: se separan por 'fecha_corte' (el día justo antes de que
+    empiece el pronóstico), que la plantilla dibuja como una línea vertical
+    entre el histórico (línea continua) y el pronóstico (punteada)."""
+    if producto is None:
+        return None
+
+    ultima_generacion = (
+        Prediccion.objects.filter(producto=producto)
+        .order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
+    )
+    pronostico = []
+    if ultima_generacion is not None:
+        pronostico = list(
+            Prediccion.objects.filter(producto=producto, fecha_generacion=ultima_generacion)
+            .order_by('fecha_objetivo').values('fecha_objetivo', 'demanda_predicha')
+        )
+    primera_fecha_pronostico = pronostico[0]['fecha_objetivo'] if pronostico else None
+
+    # Ventana de histórico: 60 días de contexto antes de que empiece el
+    # pronóstico (o antes de hoy, si todavía no hay uno generado).
+    fin_historico = (primera_fecha_pronostico - timedelta(days=1)) if primera_fecha_pronostico else date.today()
+    inicio_historico = fin_historico - timedelta(days=59)
+
+    detalles_qs = PedidoDetalle.objects.filter(
+        producto=producto,
+        pedido__fecha_solicitud__date__gte=inicio_historico,
+        pedido__fecha_solicitud__date__lte=fin_historico,
+    )
+    if origen:
+        detalles_qs = detalles_qs.filter(pedido__origen=origen)
+    reales_por_fecha = {
+        fila['pedido__fecha_solicitud__date']: float(fila['total'])
+        for fila in detalles_qs.values('pedido__fecha_solicitud__date').annotate(total=Sum('cantidad_solicitada'))
+    }
+
+    puntos = []
+    dia = inicio_historico
+    while dia <= fin_historico:
+        puntos.append({'fecha': dia.isoformat(), 'real': reales_por_fecha.get(dia, 0.0), 'pronostico': None})
+        dia += timedelta(days=1)
+    for fila in pronostico:
+        puntos.append({'fecha': fila['fecha_objetivo'].isoformat(), 'real': None, 'pronostico': fila['demanda_predicha']})
+
+    return {
+        'producto': producto,
+        'puntos_json': json.dumps(puntos),
+        'hay_pronostico': bool(pronostico),
+        'fecha_corte': fin_historico if pronostico else None,
+    }
+
+
 @login_required
 def dashboard(request):
     origen = _parsear_origen(request.GET.get('origen'))
-
-    # Por defecto, el rango cubre TODO lo que hay cargado (no una ventana
-    # arbitraria de últimos N días, que podía dejar pedidos reales fuera y
-    # mostrar un NS incompleto). Si no hay datos todavía, se usa hoy.
-    fecha_min_disponible, fecha_max_disponible = rango_disponible(origen=origen)
     hoy = date.today()
-    fecha_fin = _parsear_fecha(request.GET.get('fecha_fin')) or fecha_max_disponible or hoy
-    fecha_inicio = _parsear_fecha(request.GET.get('fecha_inicio')) or fecha_min_disponible or fecha_fin
+
+    # Control segmentado del periodo (Hoy / 7 días / 30 días / Personalizado).
+    # "Personalizado" (o su ausencia) cae al comportamiento de siempre: todo
+    # lo que hay cargado, no una ventana arbitraria que podía dejar pedidos
+    # reales fuera y mostrar un NS incompleto.
+    rango = request.GET.get('rango')
+    fecha_min_disponible, fecha_max_disponible = rango_disponible(origen=origen)
+    if rango == 'hoy':
+        fecha_inicio = fecha_fin = hoy
+    elif rango == '7d':
+        fecha_fin, fecha_inicio = hoy, hoy - timedelta(days=6)
+    elif rango == '30d':
+        fecha_fin, fecha_inicio = hoy, hoy - timedelta(days=29)
+    else:
+        rango = 'personalizado'
+        fecha_fin = _parsear_fecha(request.GET.get('fecha_fin')) or fecha_max_disponible or hoy
+        fecha_inicio = _parsear_fecha(request.GET.get('fecha_inicio')) or fecha_min_disponible or fecha_fin
     if fecha_inicio > fecha_fin:
         fecha_inicio, fecha_fin = fecha_fin, fecha_inicio
 
@@ -277,11 +370,23 @@ def dashboard(request):
     LIMITE_PREVIA = 8
     recomendaciones_todas = _recomendaciones_urgentes(origen)
     anomalias_todas = _anomalias_no_revisadas(origen)
+    top_productos = _top_productos_demanda(fecha_inicio, fecha_fin, origen)
+
+    # Recomendación destacada del dashboard: la más urgente que todavía no
+    # tiene una decisión tomada (aceptada is None). El resto sigue
+    # disponible completo en /recomendaciones.
+    recomendacion_destacada = next((r for r in recomendaciones_todas if r.aceptada is None), None)
+
+    productos_prediccion = _productos_con_prediccion(origen)
+    producto_grafico = _elegir_producto_grafico(
+        productos_prediccion, request.GET.get('producto_grafico'), top_productos,
+    )
 
     contexto = {
         'fecha_inicio': fecha_inicio,
         'fecha_fin': fecha_fin,
         'origen': origen or '',
+        'rango_activo': rango,
         'advertencia_mezcla': advertencia_mezcla,
         'ei': ei,
         'ns': ns,
@@ -299,14 +404,18 @@ def dashboard(request):
         'evolucion_json': json.dumps(evolucion),
         'recomendaciones': recomendaciones_todas[:LIMITE_PREVIA],
         'recomendaciones_total': len(recomendaciones_todas),
+        'recomendacion_destacada': recomendacion_destacada,
         'estado_modelo': _estado_modelo_activo(origen),
         'anomalias': anomalias_todas[:LIMITE_PREVIA],
         'anomalias_total': len(anomalias_todas),
         'salud_catalogo': _salud_catalogo(origen),
         'anomalias_severidad': _anomalias_por_severidad(origen),
         'distribucion_categorias': _distribucion_categorias(origen),
-        'top_productos': _top_productos_demanda(fecha_inicio, fecha_fin, origen),
+        'top_productos': top_productos,
         'motivos_no_atencion': _motivos_no_atencion(fecha_inicio, fecha_fin, origen),
+        'productos_prediccion': productos_prediccion,
+        'producto_grafico': producto_grafico,
+        'grafico_prediccion': grafico_prediccion_demanda(producto_grafico, origen),
     }
     # El formulario de filtros pide esta misma URL por HTMX y solo necesita
     # la zona de resultados: la plantilla completa (con sidebar, etc.) sería
@@ -316,3 +425,26 @@ def dashboard(request):
         else 'inventario/dashboard.html'
     )
     return render(request, plantilla, contexto)
+
+
+@login_required
+def dashboard_grafico_prediccion(request):
+    """Solo la tarjeta del gráfico de predicción de demanda: el selector de
+    producto la vuelve a pedir por htmx sin recargar el resto del
+    dashboard (indicadores, tablas, etc.), que no dependen del producto
+    elegido aquí."""
+    origen = _parsear_origen(request.GET.get('origen'))
+    productos_prediccion = _productos_con_prediccion(origen)
+    top_productos = _top_productos_demanda(
+        date.today() - timedelta(days=29), date.today(), origen,
+    )
+    producto_grafico = _elegir_producto_grafico(
+        productos_prediccion, request.GET.get('producto_grafico'), top_productos,
+    )
+    contexto = {
+        'origen': origen or '',
+        'productos_prediccion': productos_prediccion,
+        'producto_grafico': producto_grafico,
+        'grafico_prediccion': grafico_prediccion_demanda(producto_grafico, origen),
+    }
+    return render(request, 'inventario/_dashboard_grafico_prediccion.html', contexto)

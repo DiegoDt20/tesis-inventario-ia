@@ -1,0 +1,224 @@
+{% comment %}
+Contenido del asistente: se incluye tanto en la vista completa
+(/asistente, dentro de una .card normal) como en el panel del asistente
+flotante (burbuja, presente en todas las pantallas). "contenedor_id" hace
+que los id/for de este parcial no choquen si algún día ambas instancias
+conviven en la misma página; el script se apoya en document.currentScript
+para no depender de esos id de todos modos (ver más abajo).
+{% endcomment %}
+<div class="chat-widget" id="{{ contenedor_id }}"
+     data-url-stream="{% url 'inventario:asistente_stream' %}"
+     data-url-limpiar="{% url 'inventario:asistente_limpiar' %}">
+
+    <div class="chat-vacio" {% if historial %}style="display:none;"{% endif %}>
+        <i class="bi bi-chat-dots chat-vacio-icono"></i>
+        Todavía no hay conversación. Escribe una pregunta sobre stock, recomendaciones, anomalías o indicadores.
+    </div>
+    <div class="chat-historial" {% if not historial %}style="display:none;"{% endif %}>
+        {% for turno in historial %}
+            <div class="chat-mensaje chat-mensaje-usuario">
+                <div class="chat-mensaje-cuerpo">{{ turno.pregunta }}</div>
+            </div>
+            <div class="chat-mensaje chat-mensaje-asistente {% if turno.fallo %}chat-mensaje-fallo{% endif %}">
+                <div class="chat-mensaje-etiqueta">
+                    {% if turno.fallo %}
+                        <i class="bi bi-exclamation-triangle-fill"></i> Sin conexión con el modelo
+                    {% else %}
+                        <i class="bi bi-stars"></i> Asistente
+                    {% endif %}
+                </div>
+                <div class="chat-mensaje-cuerpo">{{ turno.respuesta|linebreaksbr }}</div>
+
+                {% if turno.documentos %}
+                    <details class="chat-fuentes">
+                        <summary>Fuentes usadas ({{ turno.documentos|length }})</summary>
+                        <ul>
+                            {% for doc in turno.documentos %}
+                                <li><strong>{{ doc.tipo }}</strong>{% if doc.referencia_id %} #{{ doc.referencia_id }}{% endif %}: {{ doc.contenido }}</li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="chat-pie">
+        <form method="post" action="{% url 'inventario:asistente_chat' %}" class="chat-form chat-form-envio">
+            {% csrf_token %}
+            <input type="text" name="pregunta" class="form-control chat-campo-pregunta"
+                   placeholder="Escribe tu pregunta..." autocomplete="off" required>
+            <button type="submit" class="btn btn-acento chat-boton-enviar">
+                <i class="bi bi-send icono-htmx"></i>
+                <span class="spinner-border spinner-border-sm spinner-htmx" aria-hidden="true"></span>
+            </button>
+        </form>
+
+        <form method="post" action="{% url 'inventario:asistente_limpiar' %}" class="chat-form-limpiar mt-2"
+              hx-post="{% url 'inventario:asistente_limpiar' %}" hx-target="#{{ contenedor_id }}" hx-swap="outerHTML"
+              {% if not historial %}style="display:none;"{% endif %}>
+            {% csrf_token %}
+            <input type="hidden" name="contenedor_id" value="{{ contenedor_id }}">
+            <button type="submit" class="btn btn-link btn-sm chat-boton-limpiar">
+                <i class="bi bi-trash me-1"></i>Limpiar conversación
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+    // document.currentScript apunta a este mismo <script>, tanto en la
+    // carga normal de página como cuando htmx lo vuelve a insertar tras un
+    // swap (crea un nodo <script> nuevo y lo ejecuta) — así el widget no
+    // necesita que le pasen su id por fuera para saber cuál es su propio
+    // contenedor, y dos instancias en la misma página nunca se pisan.
+    const raiz = document.currentScript.closest('.chat-widget');
+    if (!raiz || raiz.dataset.iniciado) {
+        return;
+    }
+    raiz.dataset.iniciado = '1';
+
+    const chatVacio = raiz.querySelector('.chat-vacio');
+    const historialEl = raiz.querySelector('.chat-historial');
+    const formularioEnvio = raiz.querySelector('.chat-form-envio');
+    const formularioLimpiar = raiz.querySelector('.chat-form-limpiar');
+    const campoPregunta = raiz.querySelector('.chat-campo-pregunta');
+    const botonEnviar = raiz.querySelector('.chat-boton-enviar');
+    const urlStream = raiz.dataset.urlStream;
+
+    function crearMensajeUsuario(pregunta) {
+        const el = document.createElement('div');
+        el.className = 'chat-mensaje chat-mensaje-usuario';
+        const cuerpo = document.createElement('div');
+        cuerpo.className = 'chat-mensaje-cuerpo';
+        cuerpo.textContent = pregunta;
+        el.append(cuerpo);
+        return el;
+    }
+
+    function crearMensajeAsistente() {
+        const el = document.createElement('div');
+        el.className = 'chat-mensaje chat-mensaje-asistente chat-mensaje-generando';
+        const etiqueta = document.createElement('div');
+        etiqueta.className = 'chat-mensaje-etiqueta';
+        etiqueta.innerHTML = '<i class="bi bi-stars"></i> Asistente';
+        const cuerpo = document.createElement('div');
+        cuerpo.className = 'chat-mensaje-cuerpo';
+        cuerpo.innerHTML = '<span class="puntos-escritura"><span></span><span></span><span></span></span>';
+        el.append(etiqueta, cuerpo);
+        return el;
+    }
+
+    function crearFuentes(documentos) {
+        const details = document.createElement('details');
+        details.className = 'chat-fuentes';
+        const summary = document.createElement('summary');
+        summary.textContent = `Fuentes usadas (${documentos.length})`;
+        const ul = document.createElement('ul');
+        documentos.forEach(function (doc) {
+            const li = document.createElement('li');
+            const strong = document.createElement('strong');
+            strong.textContent = doc.tipo;
+            li.append(strong);
+            let texto = doc.referencia_id ? ` #${doc.referencia_id}: ${doc.contenido}` : `: ${doc.contenido}`;
+            li.append(document.createTextNode(texto));
+            ul.appendChild(li);
+        });
+        details.append(summary, ul);
+        return details;
+    }
+
+    // Sin EventSource (navegador muy viejo o JS bloqueado): el formulario
+    // se queda como <form method="post"> normal, respuesta completa, sin
+    // streaming ni panel flotante interactivo.
+    if (!window.EventSource) {
+        return;
+    }
+
+    formularioEnvio.addEventListener('submit', function (evento) {
+        evento.preventDefault();
+        const pregunta = campoPregunta.value.trim();
+        if (!pregunta) {
+            return;
+        }
+
+        chatVacio.style.display = 'none';
+        historialEl.style.display = '';
+
+        const mensajeUsuario = crearMensajeUsuario(pregunta);
+        const mensajeAsistente = crearMensajeAsistente();
+        historialEl.append(mensajeUsuario, mensajeAsistente);
+        historialEl.scrollTop = historialEl.scrollHeight;
+
+        campoPregunta.value = '';
+        campoPregunta.disabled = true;
+        botonEnviar.disabled = true;
+        raiz.classList.add('chat-generando');
+
+        const cuerpo = mensajeAsistente.querySelector('.chat-mensaje-cuerpo');
+        let textoAcumulado = '';
+        let primerFragmento = true;
+
+        function terminar() {
+            campoPregunta.disabled = false;
+            botonEnviar.disabled = false;
+            raiz.classList.remove('chat-generando');
+            if (formularioLimpiar) {
+                formularioLimpiar.style.display = '';
+            }
+            campoPregunta.focus();
+        }
+
+        const fuenteEventos = new EventSource(urlStream + '?pregunta=' + encodeURIComponent(pregunta));
+
+        fuenteEventos.addEventListener('fragmento', function (evento) {
+            const datos = JSON.parse(evento.data);
+            if (primerFragmento) {
+                mensajeAsistente.classList.remove('chat-mensaje-generando');
+                primerFragmento = false;
+            }
+            textoAcumulado += datos.texto;
+            // textContent, nunca innerHTML: el texto lo redacta el modelo de
+            // lenguaje y no debe poder inyectar HTML en la página.
+            cuerpo.textContent = textoAcumulado;
+            cuerpo.classList.add('cursor-generando');
+            historialEl.scrollTop = historialEl.scrollHeight;
+        });
+
+        fuenteEventos.addEventListener('fin', function (evento) {
+            const datos = JSON.parse(evento.data);
+            mensajeAsistente.classList.remove('chat-mensaje-generando');
+            cuerpo.classList.remove('cursor-generando');
+            if (datos.fallo) {
+                mensajeAsistente.classList.add('chat-mensaje-fallo');
+            }
+            cuerpo.textContent = datos.respuesta;
+            if (datos.documentos && datos.documentos.length) {
+                mensajeAsistente.appendChild(crearFuentes(datos.documentos));
+            }
+            historialEl.scrollTop = historialEl.scrollHeight;
+            fuenteEventos.close();
+            terminar();
+        });
+
+        fuenteEventos.onerror = function () {
+            // Sin evento 'fin' (el servidor se cayó, o la conexión SSE se
+            // cortó a mitad de camino): no se deja el indicador de
+            // "escribiendo" congelado para siempre.
+            mensajeAsistente.classList.remove('chat-mensaje-generando');
+            cuerpo.classList.remove('cursor-generando');
+            if (!textoAcumulado) {
+                mensajeAsistente.classList.add('chat-mensaje-fallo');
+                cuerpo.textContent = 'No se pudo conectar con el asistente. Intenta de nuevo.';
+            }
+            fuenteEventos.close();
+            terminar();
+        };
+    });
+    // "Limpiar conversación" es un <form hx-post ... hx-swap="outerHTML">
+    // normal: htmx ya sabe reemplazar este contenedor completo (incluido
+    // su <script>) con la versión vacía que devuelve la vista, igual que
+    // el resto de acciones htmx del sistema.
+})();
+</script>

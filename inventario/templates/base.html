@@ -14,6 +14,13 @@
     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.14.3/dist/cdn.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js" defer></script>
+    <!-- Sin defer y en <head>, a propósito: los gráficos del dashboard son
+         <script> normales incrustados en el propio HTML (se re-ejecutan tal
+         cual en cada swap de htmx), así que Chart.js tiene que estar
+         disponible ANTES de que el parser llegue a esos scripts — si se
+         cargara al final de <body> (como bootstrap.bundle.js), la primera
+         carga completa de la página fallaría con "Chart is not defined". -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     {% block estilos %}{% endblock %}
 </head>
 <body {% if user.is_authenticated %}x-data="{ sidebarColapsada: $persist(false).as('sidebarColapsada') }"{% endif %}>
@@ -25,18 +32,8 @@
             {% include 'inventario/_sidebar_contenido.html' with mostrar_toggle_colapsar=True %}
         </aside>
 
-        <div class="topbar-movil d-lg-none">
-            <button class="btn btn-link p-0 fs-4" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebarOffcanvas">
-                <i class="bi bi-list"></i>
-            </button>
-            <a class="text-decoration-none text-white marca" href="{% url 'inventario:dashboard' %}">
-                Almacén Pinturas
-            </a>
-            <span></span>
-        </div>
-
-        <div class="offcanvas offcanvas-start offcanvas-sidebar text-white" tabindex="-1" id="sidebarOffcanvas">
-            <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-3"
+        <div class="offcanvas offcanvas-start offcanvas-sidebar" tabindex="-1" id="sidebarOffcanvas">
+            <button type="button" class="btn-close position-absolute top-0 end-0 m-3"
                     data-bs-dismiss="offcanvas" aria-label="Cerrar menú"></button>
             <div class="d-flex flex-column h-100">
                 {% include 'inventario/_sidebar_contenido.html' %}
@@ -46,6 +43,27 @@
 
     <div class="contenido-principal {% if user.is_authenticated %}con-sidebar{% endif %}"
          {% if user.is_authenticated %}:class="{ 'con-sidebar-colapsada': sidebarColapsada }"{% endif %}>
+
+        {% if user.is_authenticated %}
+            <header class="topbar">
+                <button class="topbar-boton-menu d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebarOffcanvas">
+                    <i class="bi bi-list"></i>
+                </button>
+                <div class="buscador-global" x-data="{ abierto: false }" @click.outside="abierto = false">
+                    <i class="bi bi-search buscador-icono"></i>
+                    <input type="search" class="buscador-campo" placeholder="Buscar producto, pedido o movimiento…"
+                           autocomplete="off"
+                           hx-get="{% url 'inventario:busqueda_global' %}" hx-trigger="input changed delay:300ms, focus"
+                           hx-target="#buscador-resultados" hx-swap="innerHTML"
+                           name="q" @focus="abierto = true" @keyup.escape="abierto = false; $el.blur()">
+                    <div class="buscador-resultados" x-show="abierto" x-transition.duration.120ms x-cloak
+                         id="buscador-resultados">
+                        <p class="buscador-vacio">Escribe al menos 2 letras para buscar.</p>
+                    </div>
+                </div>
+            </header>
+        {% endif %}
+
         <div class="container-fluid px-4 py-4">
             {% if messages %}
                 {% for mensaje in messages %}
@@ -68,8 +86,11 @@
         </div>
     </div>
 
+    {% if user.is_authenticated %}
+        {% include 'inventario/_asistente_flotante.html' %}
+    {% endif %}
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
         // CSRF para peticiones HTMX: GET no lo necesita, pero POST sí (aceptar/
         // rechazar recomendación, marcar anomalía revisada, filtros con submit).

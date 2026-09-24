@@ -49,13 +49,28 @@ def asistente_chat(request):
             request.session[SESSION_HISTORIAL_ASISTENTE] = historial
         return redirect('inventario:asistente_chat')
 
-    return render(request, 'inventario/asistente_chat.html', {'historial': historial})
+    return render(request, 'inventario/asistente_chat.html', {'historial': historial, 'contenedor_id': 'chat-pagina'})
+
+
+@login_required
+def asistente_panel(request):
+    """Contenido del panel del asistente flotante (burbuja, presente en
+    todas las pantallas): mismo parcial e historial de sesión que la vista
+    completa, cargado por htmx la primera vez que se abre el panel."""
+    historial = request.session.get(SESSION_HISTORIAL_ASISTENTE, [])
+    return render(request, 'inventario/_asistente_panel.html', {'historial': historial, 'contenedor_id': 'chat-flotante'})
 
 
 @login_required
 @require_POST
 def asistente_limpiar(request):
     request.session.pop(SESSION_HISTORIAL_ASISTENTE, None)
+    if request.headers.get('HX-Request') == 'true':
+        # El botón "Limpiar" del panel flotante limpia in situ (sin navegar
+        # fuera de la pantalla en la que está el usuario); el de la vista
+        # completa (/asistente) sigue siendo un <form> normal, sin htmx.
+        contenedor_id = request.POST.get('contenedor_id', 'chat-flotante')
+        return render(request, 'inventario/_asistente_panel.html', {'historial': [], 'contenedor_id': contenedor_id})
     return redirect('inventario:asistente_chat')
 
 

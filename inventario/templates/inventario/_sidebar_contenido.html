@@ -3,11 +3,15 @@ Contenido de la barra lateral: se incluye dos veces (sidebar fija en
 escritorio y offcanvas en pantallas chicas) para no duplicar el menú.
 mostrar_toggle_colapsar (solo True en la versión de escritorio) agrega el
 botón que angosta la barra a solo íconos; sidebarColapsada vive en <body>
-(ver base.html).
+(ver base.html). Agrupado en secciones (GESTIÓN / INTELIGENCIA ARTIFICIAL):
+solo aparecen las pantallas que ya existen como vista real en el sistema.
 {% endcomment %}
 <div class="sidebar-logo">
-    <div class="marca">
-        Almacén Pinturas <small class="etiqueta-colapsable">Gestión de inventario</small>
+    <div class="sidebar-logo-marca">
+        <span class="sidebar-logo-icono" aria-hidden="true"><i class="bi bi-palette-fill"></i></span>
+        <div class="marca etiqueta-colapsable">
+            Almacén Pinturas <small>Gestión inteligente</small>
+        </div>
     </div>
     {% if mostrar_toggle_colapsar %}
         <button type="button" class="btn-colapsar-sidebar" @click="sidebarColapsada = !sidebarColapsada"
@@ -17,39 +21,53 @@ botón que angosta la barra a solo íconos; sidebarColapsada vive en <body>
     {% endif %}
 </div>
 
-<nav class="sidebar-nav nav flex-column">
-    <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
-       href="{% url 'inventario:dashboard' %}" title="Dashboard">
-        <i class="bi bi-speedometer2"></i> <span class="etiqueta-colapsable">Dashboard</span>
-    </a>
-    <a class="nav-link {% if request.resolver_match.url_name == 'pedido_lista' or request.resolver_match.url_name == 'pedido_nuevo' %}active{% endif %}"
-       href="{% url 'inventario:pedido_lista' %}" title="Pedidos">
-        <i class="bi bi-cart3"></i> <span class="etiqueta-colapsable">Pedidos</span>
-    </a>
-    <a class="nav-link {% if request.resolver_match.url_name == 'movimiento_nuevo' %}active{% endif %}"
-       href="{% url 'inventario:movimiento_nuevo' %}" title="Movimientos">
-        <i class="bi bi-arrow-left-right"></i> <span class="etiqueta-colapsable">Movimientos</span>
-    </a>
-    <a class="nav-link {% if request.resolver_match.url_name == 'conteo_nuevo' %}active{% endif %}"
-       href="{% url 'inventario:conteo_nuevo' %}" title="Conteos">
-        <i class="bi bi-clipboard-check"></i> <span class="etiqueta-colapsable">Conteos</span>
-    </a>
-    {% if perms.inventario.change_recomendacion %}
-        <a class="nav-link {% if request.resolver_match.url_name == 'recomendaciones_lista' %}active{% endif %}"
-           href="{% url 'inventario:recomendaciones_lista' %}" title="Recomendaciones">
-            <i class="bi bi-lightbulb"></i> <span class="etiqueta-colapsable">Recomendaciones</span>
+<nav class="sidebar-nav">
+    <div class="sidebar-seccion">
+        <div class="sidebar-seccion-titulo etiqueta-colapsable">Gestión</div>
+
+        <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+           href="{% url 'inventario:dashboard' %}" title="Dashboard">
+            <i class="bi bi-grid-1x2-fill"></i> <span class="etiqueta-colapsable">Dashboard</span>
         </a>
-    {% endif %}
-    {% if perms.inventario.change_anomalia %}
-        <a class="nav-link {% if request.resolver_match.url_name == 'anomalias_lista' %}active{% endif %}"
-           href="{% url 'inventario:anomalias_lista' %}" title="Anomalías">
-            <i class="bi bi-exclamation-triangle"></i> <span class="etiqueta-colapsable">Anomalías</span>
+        <a class="nav-link {% if request.resolver_match.url_name == 'movimiento_nuevo' %}active{% endif %}"
+           href="{% url 'inventario:movimiento_nuevo' %}" title="Movimientos">
+            <i class="bi bi-arrow-left-right"></i> <span class="etiqueta-colapsable">Movimientos</span>
         </a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'pedido_lista' or request.resolver_match.url_name == 'pedido_nuevo' %}active{% endif %}"
+           href="{% url 'inventario:pedido_lista' %}" title="Pedidos">
+            <i class="bi bi-cart3"></i> <span class="etiqueta-colapsable">Pedidos</span>
+        </a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'conteo_nuevo' %}active{% endif %}"
+           href="{% url 'inventario:conteo_nuevo' %}" title="Conteo físico">
+            <i class="bi bi-clipboard-check"></i> <span class="etiqueta-colapsable">Conteo físico</span>
+        </a>
+    </div>
+
+    {% if perms.inventario.change_anomalia or perms.inventario.change_recomendacion %}
+        <div class="sidebar-seccion">
+            <div class="sidebar-seccion-titulo etiqueta-colapsable">Inteligencia artificial</div>
+
+            {% if perms.inventario.change_anomalia %}
+                <a class="nav-link {% if request.resolver_match.url_name == 'anomalias_lista' %}active{% endif %}"
+                   href="{% url 'inventario:anomalias_lista' %}" title="Anomalías">
+                    <i class="bi bi-shield-exclamation"></i> <span class="etiqueta-colapsable flex-grow-1">Anomalías</span>
+                    {% if anomalias_sin_revisar_total %}
+                        <span class="sidebar-contador etiqueta-colapsable">{{ anomalias_sin_revisar_total }}</span>
+                    {% endif %}
+                </a>
+            {% endif %}
+            <a class="nav-link {% if request.resolver_match.url_name == 'asistente_chat' %}active{% endif %}"
+               href="{% url 'inventario:asistente_chat' %}" title="Asistente IA">
+                <i class="bi bi-stars"></i> <span class="etiqueta-colapsable">Asistente IA</span>
+            </a>
+            {% if perms.inventario.change_recomendacion %}
+                <a class="nav-link {% if request.resolver_match.url_name == 'recomendaciones_lista' %}active{% endif %}"
+                   href="{% url 'inventario:recomendaciones_lista' %}" title="Recomendaciones">
+                    <i class="bi bi-lightbulb"></i> <span class="etiqueta-colapsable">Recomendaciones</span>
+                </a>
+            {% endif %}
+        </div>
     {% endif %}
-    <a class="nav-link {% if request.resolver_match.url_name == 'asistente_chat' %}active{% endif %}"
-       href="{% url 'inventario:asistente_chat' %}" title="Asistente">
-        <i class="bi bi-chat-dots"></i> <span class="etiqueta-colapsable">Asistente</span>
-    </a>
 </nav>
 
 <div class="sidebar-usuario" x-data="{ menuAbierto: false }" @click.outside="menuAbierto = false">
@@ -58,6 +76,7 @@ botón que angosta la barra a solo íconos; sidebarColapsada vive en <body>
         <div class="avatar">{{ user.username|slice:':1'|upper }}</div>
         <div class="flex-grow-1 overflow-hidden etiqueta-colapsable">
             <div class="usuario-nombre">{{ user.username }}</div>
+            <div class="usuario-rol">{% if user.is_superuser %}Administrador{% else %}Operador{% endif %}</div>
         </div>
         <i class="bi bi-chevron-up etiqueta-colapsable menu-usuario-flecha" :class="{ 'girada': menuAbierto }"></i>
     </button>

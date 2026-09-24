@@ -1,11 +1,16 @@
 from django.urls import path
 
-from .views import anomalias, asistente, conteos, dashboard, movimientos, pedidos, recomendaciones
+from .views import anomalias, asistente, busqueda, conteos, dashboard, movimientos, pedidos, recomendaciones
 
 app_name = 'inventario'
 
 urlpatterns = [
     path('', dashboard.dashboard, name='dashboard'),
+    path(
+        'grafico-prediccion/', dashboard.dashboard_grafico_prediccion, name='dashboard_grafico_prediccion',
+    ),
+
+    path('buscar/', busqueda.busqueda_global, name='busqueda_global'),
 
     path('pedidos/', pedidos.pedido_lista, name='pedido_lista'),
     path('pedidos/nuevo/', pedidos.pedido_nuevo, name='pedido_nuevo'),
@@ -33,6 +38,7 @@ urlpatterns = [
     ),
 
     path('asistente/', asistente.asistente_chat, name='asistente_chat'),
+    path('asistente/panel/', asistente.asistente_panel, name='asistente_panel'),
     path('asistente/limpiar/', asistente.asistente_limpiar, name='asistente_limpiar'),
     path('asistente/stream/', asistente.asistente_stream, name='asistente_stream'),
 ]

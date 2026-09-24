@@ -1,0 +1,39 @@
+{% comment %}
+Burbuja del asistente: fija abajo a la derecha en todas las pantallas
+(incluida /asistente, que además tiene la vista completa). El panel es un
+x-show de Alpine (minimizar/cerrar no destruye el DOM ni la conversación
+en curso); el contenido se trae por htmx una sola vez ("click once"), la
+primera vez que se abre — después Alpine solo muestra/oculta lo que ya
+está cargado, así que minimizar y volver a abrir no repite la consulta ni
+pierde lo escrito.
+{% endcomment %}
+<div class="asistente-flotante" x-data="{ abierto: false, minimizado: false }">
+    <div class="asistente-panel-flotante" x-show="abierto" x-transition.duration.180ms x-cloak
+         :class="{ 'asistente-panel-minimizado': minimizado }"
+         @keydown.escape.window="abierto = false">
+        <div class="asistente-panel-cabecera">
+            <span><i class="bi bi-stars me-1"></i> Asistente IA</span>
+            <div class="asistente-panel-acciones">
+                <button type="button" class="asistente-panel-boton" @click="minimizado = !minimizado"
+                        :title="minimizado ? 'Expandir' : 'Minimizar'">
+                    <i class="bi" :class="minimizado ? 'bi-chevron-up' : 'bi-dash-lg'"></i>
+                </button>
+                <button type="button" class="asistente-panel-boton" @click="abierto = false" title="Cerrar">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div class="asistente-panel-cuerpo" x-show="!minimizado" id="asistente-panel-cuerpo">
+            <div class="asistente-panel-cargando">
+                <span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Cargando conversación…
+            </div>
+        </div>
+    </div>
+
+    <button type="button" class="asistente-burbuja" @click="abierto = !abierto; minimizado = false"
+            hx-get="{% url 'inventario:asistente_panel' %}" hx-trigger="click once"
+            hx-target="#asistente-panel-cuerpo" hx-swap="innerHTML"
+            :aria-expanded="abierto.toString()" title="Abrir asistente IA">
+        <i class="bi" :class="abierto ? 'bi-x-lg' : 'bi-stars'"></i>
+    </button>
+</div>

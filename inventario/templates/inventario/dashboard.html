@@ -4,40 +4,71 @@
 {% block titulo %}Dashboard de indicadores{% endblock %}
 
 {% block contenido %}
-<h1 class="titulo-pantalla"><i class="bi bi-speedometer2 me-2"></i>Dashboard de indicadores</h1>
+<h1 class="titulo-pantalla"><i class="bi bi-grid-1x2-fill me-2"></i>Dashboard de indicadores</h1>
 <p class="titulo-pantalla-detalle">
     Los tres indicadores de la tesis, la tendencia del periodo y lo que hoy pide atención en el catálogo.
 </p>
 
-<form class="row g-2 align-items-end mb-4"
-      hx-get="{% url 'inventario:dashboard' %}" hx-target="#zona-resultados-dashboard"
-      hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-indicator="#indicador-dashboard">
-    <div class="col-auto">
-        <label class="form-label small mb-0" for="fecha_inicio">Desde</label>
-        <input type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}"
-               class="form-control form-control-sm">
+<div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"
+     x-data="{ personalizado: {% if rango_activo == 'personalizado' %}true{% else %}false{% endif %} }">
+    <div class="d-flex flex-wrap align-items-end gap-3">
+        <div class="segmentado" role="group" aria-label="Selector de periodo">
+            <a class="segmentado-opcion {% if rango_activo == 'hoy' %}active{% endif %}"
+               href="{% url 'inventario:dashboard' %}?rango=hoy{% if origen %}&origen={{ origen }}{% endif %}"
+               hx-get="{% url 'inventario:dashboard' %}?rango=hoy{% if origen %}&origen={{ origen }}{% endif %}"
+               hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+               @click="personalizado = false">Hoy</a>
+            <a class="segmentado-opcion {% if rango_activo == '7d' %}active{% endif %}"
+               href="{% url 'inventario:dashboard' %}?rango=7d{% if origen %}&origen={{ origen }}{% endif %}"
+               hx-get="{% url 'inventario:dashboard' %}?rango=7d{% if origen %}&origen={{ origen }}{% endif %}"
+               hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+               @click="personalizado = false">7 días</a>
+            <a class="segmentado-opcion {% if rango_activo == '30d' %}active{% endif %}"
+               href="{% url 'inventario:dashboard' %}?rango=30d{% if origen %}&origen={{ origen }}{% endif %}"
+               hx-get="{% url 'inventario:dashboard' %}?rango=30d{% if origen %}&origen={{ origen }}{% endif %}"
+               hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+               @click="personalizado = false">30 días</a>
+            <button type="button" class="segmentado-opcion {% if rango_activo == 'personalizado' %}active{% endif %}"
+                    @click="personalizado = !personalizado">
+                Personalizado
+            </button>
+        </div>
+
+        <form class="segmentado-personalizado" x-show="personalizado" x-cloak
+              hx-get="{% url 'inventario:dashboard' %}" hx-target="#zona-resultados-dashboard"
+              hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-indicator="#indicador-dashboard">
+            <input type="hidden" name="origen" value="{{ origen }}">
+            <div>
+                <label class="form-label small mb-0" for="fecha_inicio">Desde</label>
+                <input type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}"
+                       class="form-control form-control-sm">
+            </div>
+            <div>
+                <label class="form-label small mb-0" for="fecha_fin">Hasta</label>
+                <input type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin|date:'Y-m-d' }}"
+                       class="form-control form-control-sm">
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">
+                <i class="bi bi-arrow-repeat me-1 icono-htmx"></i>
+                <span class="spinner-border spinner-htmx" id="indicador-dashboard" aria-hidden="true"></span>
+                Aplicar
+            </button>
+        </form>
     </div>
-    <div class="col-auto">
-        <label class="form-label small mb-0" for="fecha_fin">Hasta</label>
-        <input type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin|date:'Y-m-d' }}"
-               class="form-control form-control-sm">
-    </div>
-    <div class="col-auto">
-        <label class="form-label small mb-0" for="origen">Origen</label>
+
+    <form hx-get="{% url 'inventario:dashboard' %}" hx-trigger="change from:#origen"
+          hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true">
+        <input type="hidden" name="rango" value="{{ rango_activo }}">
+        <input type="hidden" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}">
+        <input type="hidden" name="fecha_fin" value="{{ fecha_fin|date:'Y-m-d' }}">
+        <label class="form-label small mb-0" for="origen">Origen de datos</label>
         <select id="origen" name="origen" class="form-select form-select-sm">
             <option value="" {% if not origen %}selected{% endif %}>Todos</option>
             <option value="prueba" {% if origen == 'prueba' %}selected{% endif %}>Prueba</option>
             <option value="real" {% if origen == 'real' %}selected{% endif %}>Real</option>
         </select>
-    </div>
-    <div class="col-auto">
-        <button type="submit" class="btn btn-primary btn-sm">
-            <i class="bi bi-arrow-repeat me-1 icono-htmx"></i>
-            <span class="spinner-border spinner-htmx" id="indicador-dashboard" aria-hidden="true"></span>
-            Actualizar
-        </button>
-    </div>
-</form>
+    </form>
+</div>
 
 <div id="zona-resultados-dashboard" class="zona-resultados">
     {% include 'inventario/_dashboard_resultados.html' %}

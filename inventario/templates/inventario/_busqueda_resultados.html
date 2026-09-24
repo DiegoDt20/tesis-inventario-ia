@@ -1,0 +1,52 @@
+{% load inventario_extras %}
+{% if texto|length < 2 %}
+    <p class="buscador-vacio">Escribe al menos 2 letras para buscar.</p>
+{% elif not productos and not pedidos and not movimientos %}
+    <p class="buscador-vacio">Sin resultados para «{{ texto }}».</p>
+{% else %}
+    {% if productos %}
+        <div class="buscador-grupo">
+            <div class="buscador-grupo-titulo">Productos</div>
+            {% for p in productos %}
+                <div class="buscador-fila">
+                    <i class="bi bi-box-seam"></i>
+                    <div class="buscador-fila-texto">
+                        <span class="buscador-fila-principal">{{ p.codigo }} — {{ p.nombre }}</span>
+                        <span class="buscador-fila-secundaria">Stock actual: {{ p.stock_actual }} · {{ p.get_categoria_display }}</span>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if pedidos %}
+        <div class="buscador-grupo">
+            <div class="buscador-grupo-titulo">Pedidos</div>
+            {% for pe in pedidos %}
+                <a class="buscador-fila" href="{% url 'inventario:pedido_lista' %}?fecha={{ pe.fecha_solicitud|date:'Y-m-d' }}">
+                    <i class="bi bi-cart3"></i>
+                    <div class="buscador-fila-texto">
+                        <span class="buscador-fila-principal">N.° {{ pe.pk }} — {{ pe.cliente }}</span>
+                        <span class="buscador-fila-secundaria">
+                            {{ pe.fecha_solicitud|date:'d/m/Y' }} ·
+                            <span class="badge-suave badge-suave-{{ pe.estado|color_estado }}">{{ pe.get_estado_display }}</span>
+                        </span>
+                    </div>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if movimientos %}
+        <div class="buscador-grupo">
+            <div class="buscador-grupo-titulo">Movimientos</div>
+            {% for m in movimientos %}
+                <div class="buscador-fila">
+                    <i class="bi bi-arrow-left-right"></i>
+                    <div class="buscador-fila-texto">
+                        <span class="buscador-fila-principal">{{ m.get_tipo_display }} · {{ m.cantidad }} u. — {{ m.producto.codigo }}</span>
+                        <span class="buscador-fila-secundaria">{{ m.fecha|date:'d/m/Y H:i' }}{% if m.documento %} · {{ m.documento }}{% endif %}</span>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endif %}
