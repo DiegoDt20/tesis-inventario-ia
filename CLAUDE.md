@@ -26,8 +26,13 @@ indicadores.
   `COI = costos de almacenamiento + pérdidas por desabastecimiento`
   Se apoya en `CostoAlmacenamiento` (costos de almacenamiento) y en los
   `PedidoDetalle` no atendidos por completo, valorizados al margen
-  (`precio_venta - costo_compra`) del producto (pérdidas por
-  desabastecimiento). `calcular_coi()` (`inventario/servicios/indicadores.py`)
+  unitario congelado en la propia línea (`precio_venta_unitario -
+  costo_compra_unitario`, fijados al registrar el pedido; NO el precio
+  actual del `Producto`), para que el COI del pretest no cambie al
+  actualizar precios (pérdidas por desabastecimiento). Las 514 líneas que
+  existían al agregar esos campos (migración 0021) se reconstruyeron con
+  los precios del producto al 24/09/2026 y tienen
+  `precios_reconstruidos=True`: no son el valor histórico real. `calcular_coi()` (`inventario/servicios/indicadores.py`)
   **no** lee el modelo `Merma` directamente. Las mermas ya entran al COI por
   otra vía: `cargar_datos` (hoja `3_COI_CA`) carga el monto agregado
   "Mermas del periodo" como una fila más de `CostoAlmacenamiento`, porque

@@ -356,6 +356,19 @@ class PedidoDetalle(models.Model):
     motivo_no_atencion = models.CharField(
         max_length=20, choices=MotivoNoAtencion.choices, null=True, blank=True
     )
+    # Precio y costo del producto vigentes al registrar la línea. El COI
+    # valoriza las pérdidas por desabastecimiento con ESTOS valores, no con
+    # los actuales del Producto: así el COI del pretest queda fijo aunque
+    # después se actualicen precios (requisito del diseño preexperimental).
+    # Se llenan solos al crear la línea (save) y no cambian después.
+    precio_venta_unitario = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+    costo_compra_unitario = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+    # True si los dos campos anteriores NO son los vigentes al registrar el
+    # pedido sino una reconstrucción: las líneas que ya existían cuando se
+    # agregaron estos campos (migración 0021) se llenaron con el precio y
+    # costo que el producto tenía el 24/09/2026, porque el valor histórico
+    # real no se había guardado.
+    precios_reconstruidos = models.BooleanField(default=False, editable=False)
 
     class Meta:
         verbose_name = 'Detalle de pedido'
@@ -366,6 +379,34 @@ class PedidoDetalle(models.Model):
 
     def __str__(self):
         return f'{self.pedido} - {self.producto.codigo}'
+
+    def save(self, *args, **kwargs):
+        # to_python: el Producto en memoria puede traer el precio como texto
+        # (p. ej. recién creado con precio_venta='50.00'); se normaliza a
+        # Decimal para que el valor en memoria sea el mismo que en la base.
+        a_decimal = self._meta.get_field('precio_venta_unitario').to_python
+        if self._state.adding:
+            if self.precio_venta_unitario is None:
+                self.precio_venta_unitario = self.producto.precio_venta
+            if self.costo_compra_unitario is None:
+                self.costo_compra_unitario = self.producto.costo_compra
+            self.precio_venta_unitario = a_decimal(self.precio_venta_unitario)
+            self.costo_compra_unitario = a_decimal(self.costo_compra_unitario)
+        else:
+            # Un cambio de precio del producto no debe reescribir el precio
+            # congelado de una línea ya registrada, ni siquiera por error.
+            guardados = PedidoDetalle.objects.filter(pk=self.pk).values(
+                'precio_venta_unitario', 'costo_compra_unitario',
+            ).first()
+            if guardados and (
+                guardados['precio_venta_unitario'] != a_decimal(self.precio_venta_unitario)
+                or guardados['costo_compra_unitario'] != a_decimal(self.costo_compra_unitario)
+            ):
+                raise ValueError(
+                    'El precio y el costo de una línea de pedido se fijan al registrarla '
+                    'y no se pueden modificar después.'
+                )
+        super().save(*args, **kwargs)
 
 
 class ConteoFisico(models.Model):

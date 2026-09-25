@@ -89,9 +89,12 @@ class PedidoDetalleAdmin(admin.ModelAdmin):
     list_display = (
         'pedido', 'producto', 'cantidad_solicitada', 'cantidad_atendida',
         'atendido_a_tiempo', 'motivo_no_atencion', 'fecha_atencion',
+        'precio_venta_unitario', 'costo_compra_unitario', 'precios_reconstruidos',
     )
-    list_filter = ('atendido_a_tiempo', 'motivo_no_atencion')
+    list_filter = ('atendido_a_tiempo', 'motivo_no_atencion', 'precios_reconstruidos')
     search_fields = ('pedido__cliente', 'producto__codigo', 'producto__nombre')
+    # Se muestran pero no se editan: se fijan al registrar la línea.
+    readonly_fields = ('precio_venta_unitario', 'costo_compra_unitario', 'precios_reconstruidos')
 
 
 @admin.register(ConteoFisico)

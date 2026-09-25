@@ -142,6 +142,50 @@ class CalcularCOITests(TestCase):
         self.assertTrue(resultado['tiene_datos'])
 
 
+
+    def _pedido_no_atendido(self):
+        pedido = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime(2026, 1, 10)),
+            cliente='C-002', canal=Pedido.Canal.MOSTRADOR,
+        )
+        # 10 - 4 = 6 unidades no atendidas * margen 20.00 = 120.00
+        return PedidoDetalle.objects.create(
+            pedido=pedido, producto=self.producto,
+            cantidad_solicitada=10, cantidad_atendida=4, atendido_a_tiempo=False,
+        )
+
+    def test_la_linea_congela_precio_y_costo_al_registrarse(self):
+        detalle = self._pedido_no_atendido()
+        self.assertEqual(detalle.precio_venta_unitario, Decimal('50.00'))
+        self.assertEqual(detalle.costo_compra_unitario, Decimal('30.00'))
+        self.assertFalse(detalle.precios_reconstruidos)
+
+    def test_cambiar_precio_del_producto_no_cambia_el_coi(self):
+        self._pedido_no_atendido()
+        antes = calcular_coi()
+        self.assertEqual(antes['desabastecimiento'], Decimal('120.00'))
+
+        self.producto.precio_venta = Decimal('500.00')
+        self.producto.costo_compra = Decimal('1.00')
+        self.producto.save()
+
+        self.assertEqual(calcular_coi(), antes)
+
+    def test_editar_la_linea_conserva_el_precio_congelado(self):
+        detalle = self._pedido_no_atendido()
+        Producto.objects.filter(pk=self.producto.pk).update(precio_venta=Decimal('99.00'))
+        detalle.refresh_from_db()
+        detalle.cantidad_atendida = 10
+        detalle.save()
+        detalle.refresh_from_db()
+        self.assertEqual(detalle.precio_venta_unitario, Decimal('50.00'))
+
+    def test_no_se_puede_reescribir_el_precio_congelado(self):
+        detalle = self._pedido_no_atendido()
+        detalle.precio_venta_unitario = Decimal('70.00')
+        with self.assertRaises(ValueError):
+            detalle.save()
+
 class SerieMensualTests(TestCase):
     def setUp(self):
         self.producto = Producto.objects.create(

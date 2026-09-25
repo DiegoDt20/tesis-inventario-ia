@@ -72,8 +72,11 @@ def calcular_coi(fecha_inicio=None, fecha_fin=None, origen=None):
     Costos de almacenamiento: suma de CostoAlmacenamiento.monto en el rango
     (filtrado por periodo_mes). Pérdidas por desabastecimiento: para cada
     PedidoDetalle no atendido por completo en el rango (filtrado por
-    Pedido.fecha_solicitud), (cantidad no atendida) * margen del producto
-    (precio_venta - costo_compra).
+    Pedido.fecha_solicitud), (cantidad no atendida) * margen unitario de la
+    línea (precio_venta_unitario - costo_compra_unitario). Son el precio y
+    el costo congelados al registrar el pedido, NO los actuales del
+    Producto: así el COI de un periodo ya medido (el pretest) no cambia
+    cuando después se actualizan precios.
 
     Devuelve {'valor': Decimal, 'almacenamiento': Decimal,
     'desabastecimiento': Decimal, 'tiene_datos': bool}. valor siempre es un
@@ -100,12 +103,12 @@ def calcular_coi(fecha_inicio=None, fecha_fin=None, origen=None):
 
     detalles_qs = pedidos_qs.filter(
         cantidad_atendida__lt=F('cantidad_solicitada'),
-    ).select_related('producto')
+    ).values_list('cantidad_solicitada', 'cantidad_atendida', 'precio_venta_unitario', 'costo_compra_unitario')
 
     desabastecimiento = sum(
         (
-            (d.cantidad_solicitada - d.cantidad_atendida) * (d.producto.precio_venta - d.producto.costo_compra)
-            for d in detalles_qs
+            (solicitada - atendida) * (precio_venta - costo_compra)
+            for solicitada, atendida, precio_venta, costo_compra in detalles_qs
         ),
         Decimal('0.00'),
     )
