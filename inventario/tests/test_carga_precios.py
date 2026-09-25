@@ -2,6 +2,7 @@
 stock mínimo desde Excel, y el reporte de códigos inexistentes y productos
 sin precio."""
 import tempfile
+from datetime import datetime
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -10,8 +11,10 @@ import openpyxl
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
-from ..models import Producto
+from ..models import Pedido, PedidoDetalle, Producto
+from ..servicios.indicadores import calcular_coi
 
 
 class CargarPreciosTests(TestCase):
@@ -122,3 +125,80 @@ class CargarPreciosTests(TestCase):
         self.assertIn('Fila 2, columna "costo de compra": se leyó la fecha 1900-01-07 12:00, se convirtió al número 7.5.', salida)
         self.assertIn('se convirtió al número 100.', salida)
         self.assertIn('El archivo no trae stock mínimo', salida)
+
+
+class CompletarPedidosTests(TestCase):
+    """--completar-pedidos: líneas de pedido registradas cuando el producto
+    aún tenía precio en 0 (congelado en 0) se completan con el archivo."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        # Como lo deja cargar_datos al encontrar un producto nuevo.
+        self.producto = Producto.objects.create(codigo='PIN-500', nombre='Nuevo', precio_venta=0, costo_compra=0)
+        pedido = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime(2026, 10, 5)), cliente='C-1', canal=Pedido.Canal.MOSTRADOR,
+        )
+        # 10 - 4 = 6 unidades no atendidas.
+        self.linea = PedidoDetalle.objects.create(
+            pedido=pedido, producto=self.producto, cantidad_solicitada=10, cantidad_atendida=4,
+        )
+        libro = openpyxl.Workbook()
+        libro.active.append(['Código', 'Precio de venta', 'Costo de compra'])
+        libro.active.append(['PIN-500', 50, 30])
+        self.ruta = Path(self.dir.name) / 'precios.xlsx'
+        libro.save(self.ruta)
+
+    def _correr(self, **opciones):
+        salida = StringIO()
+        call_command('cargar_precios', archivo=str(self.ruta), stdout=salida, **opciones)
+        return salida.getvalue()
+
+    def test_sin_la_opcion_la_linea_queda_en_cero(self):
+        self._correr()
+        self.linea.refresh_from_db()
+        self.assertEqual(self.linea.precio_venta_unitario, Decimal('0.00'))
+        self.assertEqual(calcular_coi()['desabastecimiento'], Decimal('0.00'))
+
+    def test_completa_la_linea_la_marca_y_el_coi_la_cuenta(self):
+        salida = self._correr(completar_pedidos=True)
+        self.linea.refresh_from_db()
+        self.assertEqual(
+            (self.linea.precio_venta_unitario, self.linea.costo_compra_unitario), (Decimal('50.00'), Decimal('30.00')),
+        )
+        self.assertTrue(self.linea.precios_reconstruidos)
+        self.assertEqual(calcular_coi()['desabastecimiento'], Decimal('120.00'))  # 6 u. × margen 20
+        self.assertIn('completadas (marcadas como reconstruidas): 1, de ellas no atendidas por completo, que suman al COI: 1', salida)
+
+    def test_orden_de_carga_no_importa(self):
+        # Precios cargados antes sin la opción; después, con la opción, el
+        # producto ya no cambia pero sus líneas en 0 sí se completan.
+        self._correr()
+        salida = self._correr(completar_pedidos=True)
+        self.assertIn('Productos actualizados: 0', salida)
+        self.assertEqual(calcular_coi()['desabastecimiento'], Decimal('120.00'))
+
+    def test_dry_run_reporta_sin_escribir(self):
+        salida = self._correr(completar_pedidos=True, dry_run=True)
+        self.assertIn('que se completarían (marcadas como reconstruidas): 1', salida)
+        self.linea.refresh_from_db()
+        self.assertEqual(self.linea.precio_venta_unitario, Decimal('0.00'))
+        self.assertFalse(self.linea.precios_reconstruidos)
+
+    def test_solo_llena_el_campo_en_cero(self):
+        # Precio de venta ya congelado (distinto de 0): no se toca.
+        PedidoDetalle.objects.filter(pk=self.linea.pk).update(precio_venta_unitario=Decimal('45.00'))
+        self._correr(completar_pedidos=True)
+        self.linea.refresh_from_db()
+        self.assertEqual(
+            (self.linea.precio_venta_unitario, self.linea.costo_compra_unitario), (Decimal('45.00'), Decimal('30.00')),
+        )
+
+    def test_lineas_con_precio_no_se_marcan(self):
+        otro = Producto.objects.create(codigo='PIN-501', nombre='Con precio', precio_venta=20, costo_compra=10)
+        linea = PedidoDetalle.objects.create(
+            pedido=self.linea.pedido, producto=otro, cantidad_solicitada=5, cantidad_atendida=5,
+        )
+        self._correr(completar_pedidos=True)
+        linea.refresh_from_db()
+        self.assertFalse(linea.precios_reconstruidos)

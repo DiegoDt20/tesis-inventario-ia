@@ -32,9 +32,13 @@ indicadores.
   actualizar precios (pérdidas por desabastecimiento). Las 514 líneas que
   existían al agregar esos campos (migración 0021) se reconstruyeron con
   los precios del producto al 24/09/2026 y tienen
-  `precios_reconstruidos=True`: no son el valor histórico real. `calcular_coi()` (`inventario/servicios/indicadores.py`)
-  **no** lee el modelo `Merma` directamente. Las mermas ya entran al COI por
-  otra vía: `cargar_datos` (hoja `3_COI_CA`) carga el monto agregado
+  `precios_reconstruidos=True`: no son el valor histórico real. También se
+  marcan así las líneas que quedaron en 0 (pedido importado antes de
+  conocer el precio del producto) y se completan con
+  `cargar_precios --completar-pedidos`, así que el orden de carga
+  (precios antes o después de pedidos) no cambia el COI.
+  `calcular_coi()` (`inventario/servicios/indicadores.py`) **no** lee el
+  modelo `Merma` directamente. Las mermas ya entran al COI por otra vía: `cargar_datos` (hoja `3_COI_CA`) carga el monto agregado
   "Mermas del periodo" como una fila más de `CostoAlmacenamiento`, porque
   esa hoja no trae el desglose por producto/cantidad que `Merma` exige. Si
   algún día se quiere registrar mermas individuales en `Merma` y sumarlas al
@@ -95,12 +99,17 @@ indicadores.
   importa las fichas de registro (Excel con hojas `1_EI`, `2_NS`, `3_COI_CA`,
   `3_COI_PD`) y calcula los tres indicadores desde la base de datos para
   verificar que la importación no deformó los datos.
-- Comando `cargar_precios --archivo precios.xlsx [--hoja nombre] [--dry-run]`
+- Comando `cargar_precios --archivo precios.xlsx [--hoja nombre]
+  [--completar-pedidos] [--dry-run]`
   (`inventario/management/commands/cargar_precios.py`): actualiza
-  `precio_venta`, `costo_compra` y `stock_minimo` de productos existentes
-  (columnas código, precio de venta, costo de compra, stock mínimo). No crea
-  productos; reporta actualizados, códigos inexistentes y productos activos
-  que siguen sin precio (precio de venta o costo de compra en 0).
+  `precio_venta`, `costo_compra` y, si el archivo trae la columna,
+  `stock_minimo` de productos existentes. No crea productos; reporta
+  actualizados, códigos inexistentes y productos activos que siguen sin
+  precio (precio de venta o costo de compra en 0). Convierte a número las
+  celdas de precio que openpyxl lee como fecha (formato "S/ #,##0.00"),
+  con una advertencia por celda. Con `--completar-pedidos` también llena
+  las líneas de pedido con precio o costo congelado en 0 y las marca como
+  reconstruidas.
 
 ### Etapa 2 — motor de predicción de demanda con transferencia de aprendizaje (en curso)
 

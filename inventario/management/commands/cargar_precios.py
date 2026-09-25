@@ -16,10 +16,10 @@ import openpyxl
 from openpyxl.utils.datetime import to_excel
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
-from inventario.models import Producto
+from inventario.models import PedidoDetalle, Producto
 
 from .cargar_datos import Command as CargarDatos
 
@@ -64,6 +64,9 @@ class Resumen:
     sin_cambios: int = 0
     filas_omitidas: int = 0
     celdas_fecha_convertidas: int = 0
+    # Solo con --completar-pedidos (None = la opción no se usó).
+    lineas_pedido_completadas: int = None
+    lineas_pedido_no_atendidas_completadas: int = None
     codigos_inexistentes: list = field(default_factory=list)
     advertencias: list = field(default_factory=list)
 
@@ -85,6 +88,16 @@ class Command(BaseCommand):
         parser.add_argument(
             '--hoja', default=None,
             help='Nombre de la hoja a leer (por defecto, la primera del libro).',
+        )
+        parser.add_argument(
+            '--completar-pedidos', action='store_true',
+            help=(
+                'Además, completa las líneas de pedido de los productos del archivo cuyo '
+                'precio de venta o costo de compra guardado siga en 0 (p. ej. pedidos '
+                'importados antes de conocer el precio), con los valores del archivo, y '
+                'las marca como reconstruidas (precios_reconstruidos). Solo se llena el '
+                'campo que está en 0; un valor ya guardado distinto de 0 no se toca.'
+            ),
         )
         parser.add_argument(
             '--dry-run', action='store_true',
@@ -120,11 +133,13 @@ class Command(BaseCommand):
             )
         }
         a_guardar = []
+        encontrados = []
         for codigo, (fila, valores) in valores_por_codigo.items():
             producto = productos.get(codigo.upper())
             if producto is None:
                 resumen.codigos_inexistentes.append(codigo)
                 continue
+            encontrados.append((producto, valores))
             if valores['precio_venta'] < valores['costo_compra']:
                 resumen.advertencias.append(
                     f'Fila {fila}, código {codigo}: el precio de venta '
@@ -144,12 +159,50 @@ class Command(BaseCommand):
             ahora = timezone.now()
             for producto in a_guardar:
                 producto.actualizado_en = ahora
-            with transaction.atomic():
+
+        with transaction.atomic():
+            if not options['dry_run']:
                 Producto.objects.bulk_update(
                     a_guardar, [c for c in ALIAS_COLUMNAS if c in columnas and c != 'codigo'] + ['actualizado_en'],
                 )
+            if options['completar_pedidos']:
+                self._completar_pedidos(encontrados, options['dry_run'], resumen)
 
         self._imprimir_resumen(resumen, options['dry_run'], a_guardar, 'stock_minimo' in columnas)
+
+    @staticmethod
+    def _completar_pedidos(encontrados, dry_run, resumen):
+        """Llena el precio/costo congelado de las líneas de pedido que siguen
+        en 0 con los valores del archivo. Esas líneas se registraron cuando
+        el producto aún no tenía precio (cargar_datos crea los productos
+        nuevos en 0), y un margen de 0 congelado haría que su
+        desabastecimiento no cuente nunca en el COI. Se hace con
+        queryset.update() a propósito: PedidoDetalle.save() prohíbe cambiar
+        un precio ya fijado, y esta es la única corrección permitida, que
+        queda marcada con precios_reconstruidos=True."""
+        lineas = set()
+        no_atendidas = set()
+        for producto, valores in encontrados:
+            base = PedidoDetalle.objects.filter(producto=producto)
+            por_campo = (
+                ('precio_venta_unitario', valores['precio_venta']),
+                ('costo_compra_unitario', valores['costo_compra']),
+            )
+            for campo, valor in por_campo:
+                if valor <= 0:
+                    continue  # completar un 0 con otro 0 no corrige nada
+                qs = base.filter(**{campo: 0})
+                ids = set(qs.values_list('pk', flat=True))
+                if not ids:
+                    continue
+                lineas |= ids
+                no_atendidas |= set(
+                    qs.filter(cantidad_atendida__lt=F('cantidad_solicitada')).values_list('pk', flat=True)
+                )
+                if not dry_run:
+                    qs.update(**{campo: valor, 'precios_reconstruidos': True})
+        resumen.lineas_pedido_completadas = len(lineas)
+        resumen.lineas_pedido_no_atendidas_completadas = len(no_atendidas)
 
     # ------------------------------------------------------------------
     # Lectura del Excel
@@ -335,6 +388,13 @@ class Command(BaseCommand):
                 f'{resumen.celdas_fecha_convertidas} (detalle en las advertencias).'
             ))
 
+        if resumen.lineas_pedido_completadas is not None:
+            verbo_lineas = 'que se completarían' if dry_run else 'completadas'
+            self.stdout.write(
+                f'Líneas de pedido con precio o costo en 0 {verbo_lineas} (marcadas como '
+                f'reconstruidas): {resumen.lineas_pedido_completadas}, de ellas no atendidas '
+                f'por completo, que suman al COI: {resumen.lineas_pedido_no_atendidas_completadas}'
+            )
         self.stdout.write(f'Códigos del archivo que no existen en el catálogo: {len(resumen.codigos_inexistentes)}')
         self._listar(resumen.codigos_inexistentes)
 

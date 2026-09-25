@@ -364,10 +364,13 @@ class PedidoDetalle(models.Model):
     precio_venta_unitario = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
     costo_compra_unitario = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
     # True si los dos campos anteriores NO son los vigentes al registrar el
-    # pedido sino una reconstrucción: las líneas que ya existían cuando se
-    # agregaron estos campos (migración 0021) se llenaron con el precio y
-    # costo que el producto tenía el 24/09/2026, porque el valor histórico
-    # real no se había guardado.
+    # pedido sino una reconstrucción. Dos casos:
+    # - las líneas que ya existían cuando se agregaron estos campos
+    #   (migración 0021), llenadas con el precio y costo que el producto
+    #   tenía el 24/09/2026, porque el valor histórico real no se guardó;
+    # - las líneas registradas cuando el producto aún tenía precio o costo
+    #   en 0 (cargar_datos crea los productos nuevos así), completadas
+    #   después con "cargar_precios --completar-pedidos".
     precios_reconstruidos = models.BooleanField(default=False, editable=False)
 
     class Meta:
