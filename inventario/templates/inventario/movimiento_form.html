@@ -8,56 +8,106 @@
 
 {% include 'inventario/_lista_productos.html' %}
 
-<div class="card" style="max-width: 640px;">
-    <div class="card-body">
-        {% if form.non_field_errors %}
-            <div class="alert alert-danger d-flex align-items-center gap-2">
-                <i class="bi bi-x-circle-fill"></i>{{ form.non_field_errors }}
-            </div>
-        {% endif %}
-        <form method="post">
-            {% csrf_token %}
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-body">
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger d-flex align-items-center gap-2">
+                        <i class="bi bi-x-circle-fill"></i>{{ form.non_field_errors }}
+                    </div>
+                {% endif %}
+                <form method="post">
+                    {% csrf_token %}
 
-            <div class="mb-3">
-                <label class="form-label" for="{{ form.producto.id_for_label }}">Producto</label>
-                {{ form.producto }}
-                {% for error in form.producto.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
-            </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.producto.id_for_label }}">Producto</label>
+                        {{ form.producto }}
+                        {% for error in form.producto.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                        <!-- Contexto del producto elegido: stock, mínimo,
+                             categoría y sus últimos movimientos, para
+                             decidir sin cambiar de pantalla. -->
+                        <div id="contexto-producto"
+                             hx-get="{% url 'inventario:movimiento_contexto_producto' %}"
+                             hx-trigger="change from:#id_producto, blur from:#id_producto"
+                             hx-include="#id_producto" hx-swap="innerHTML"></div>
+                    </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="{{ form.tipo.id_for_label }}">Tipo</label>
-                {{ form.tipo }}
-                {% for error in form.tipo.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
-            </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.tipo.id_for_label }}">Tipo</label>
+                        {{ form.tipo }}
+                        {% for error in form.tipo.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="{{ form.cantidad.id_for_label }}">Cantidad</label>
-                {{ form.cantidad }}
-                {% for error in form.cantidad.errors %}
-                    <div class="text-danger small">{{ error }}</div>
-                {% endfor %}
-                <!-- Validación en vivo: avisa si esta salida deja el stock en
-                     negativo, antes de intentar guardar (Movimiento.clean()
-                     ya lo bloquea al guardar; esto solo adelanta el aviso). -->
-                <div id="aviso-stock"></div>
-            </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.cantidad.id_for_label }}">Cantidad</label>
+                        {{ form.cantidad }}
+                        {% for error in form.cantidad.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                        <!-- Validación en vivo: avisa si esta salida deja el stock en
+                             negativo, antes de intentar guardar (Movimiento.clean()
+                             ya lo bloquea al guardar; esto solo adelanta el aviso). -->
+                        <div id="aviso-stock"></div>
+                    </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="{{ form.documento.id_for_label }}">{{ form.documento.label }}</label>
-                {{ form.documento }}
-            </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.documento.id_for_label }}">{{ form.documento.label }}</label>
+                        {{ form.documento }}
+                    </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="{{ form.motivo.id_for_label }}">{{ form.motivo.label }}</label>
-                {{ form.motivo }}
-            </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.motivo.id_for_label }}">{{ form.motivo.label }}</label>
+                        {{ form.motivo }}
+                    </div>
 
-            <button type="submit" class="btn btn-primary btn-grande"><i class="bi bi-check-lg me-1"></i>Registrar movimiento</button>
-        </form>
+                    <button type="submit" class="btn btn-primary btn-grande"><i class="bi bi-check-lg me-1"></i>Registrar movimiento</button>
+                    <a href="{% url 'inventario:movimiento_lista' %}" class="btn btn-outline-secondary"><i class="bi bi-x-lg me-1"></i>Cancelar</a>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-clock-history me-1"></i> Movimientos de hoy</h6>
+                {% if movimientos_hoy %}
+                    <p class="text-muted small mb-3">Para confirmar de un vistazo lo que ya quedó registrado.</p>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle mb-0 tabla-compacta">
+                            <thead>
+                                <tr>
+                                    <th>Hora</th>
+                                    <th>Producto</th>
+                                    <th>Tipo</th>
+                                    <th class="text-end">Cantidad</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for m in movimientos_hoy %}
+                                    <tr>
+                                        <td>{{ m.fecha|date:'H:i' }}</td>
+                                        <td>{{ m.producto.codigo }}</td>
+                                        <td>{{ m.get_tipo_display }}</td>
+                                        <td class="text-end">{{ m.cantidad }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="estado-vacio-discreto mb-0">Todavía no se registró ningún movimiento hoy.</p>
+                {% endif %}
+                <a href="{% url 'inventario:movimiento_lista' %}" class="d-inline-block mt-3 small">
+                    Ver todos los movimientos <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

@@ -184,17 +184,22 @@ class AnomaliasPartialYAccionesTests(TestCase):
         self.assertNotContains(respuesta, 'sidebar-nav')
         self.assertContains(respuesta, 'Base Blanca')
 
-    def test_marcar_revisada_por_htmx_devuelve_vacio_y_actualiza_la_bd(self):
+    def test_marcar_revisada_por_htmx_repinta_la_lista_y_actualiza_la_bd(self):
+        # Se repinta la lista completa (no solo se quita la fila) para que
+        # también se actualicen los totales del encabezado de cada conteo.
         respuesta = self.client.post(
             reverse('inventario:anomalia_marcar_revisada', args=[self.anomalia.pk]),
-            HTTP_HX_REQUEST='true',
+            {'motivo': 'otro'}, HTTP_HX_REQUEST='true', HTTP_HX_PROMPT='Producto mal etiquetado',
         )
 
         self.assertEqual(respuesta.status_code, 200)
-        self.assertEqual(respuesta.content, b'')
+        self.assertNotContains(respuesta, 'sidebar-nav')
+        self.assertContains(respuesta, 'No hay anomalías sin revisar')
         self.anomalia.refresh_from_db()
         self.assertTrue(self.anomalia.revisada)
         self.assertIsNotNone(self.anomalia.fecha_revision)
+        self.assertEqual(self.anomalia.motivo_revision, 'otro')
+        self.assertEqual(self.anomalia.detalle_revision, 'Producto mal etiquetado')
 
     def test_marcar_revisada_sin_htmx_sigue_redirigiendo_como_antes(self):
         respuesta = self.client.post(

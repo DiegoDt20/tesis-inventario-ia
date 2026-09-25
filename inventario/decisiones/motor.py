@@ -10,7 +10,7 @@ from django.db.models import F, Sum
 
 from inventario.ml.carga_interna import leer_demanda_interna
 from inventario.ml.features import construir_features
-from inventario.models import Compra, CompraDetalle, Prediccion, Recomendacion
+from inventario.models import Compra, CompraDetalle, NivelPrediccion, Prediccion, Recomendacion
 
 from .calculos import cantidad_a_pedir, punto_reorden, stock_seguridad
 from .explicacion import generar_explicacion
@@ -72,25 +72,46 @@ def _pedidos_en_transito(producto):
 def _demanda_predicha_periodo(producto, dias_cobertura):
     """Suma de la demanda predicha para los próximos `dias_cobertura` días,
     tomando el lote de predicciones más reciente de este producto (todas
-    las que comparten la misma fecha_generacion). Devuelve
-    (demanda_periodo, demanda_diaria_promedio) o (None, None) si el
+    las que comparten la misma fecha_generacion). Devuelve un dict con
+    'demanda_periodo', 'demanda_diaria' (promedio), 'dias_horizonte' y,
+    si la predicción fue por categoría, 'demanda_categoria_periodo' y
+    'participacion_usada' (None si fue por producto); o None si el
     producto no tiene predicciones."""
     ultima_generacion = Prediccion.objects.filter(producto=producto).order_by(
         '-fecha_generacion'
     ).values_list('fecha_generacion', flat=True).first()
     if ultima_generacion is None:
-        return None, None
+        return None
 
     predicciones = list(
         Prediccion.objects.filter(producto=producto, fecha_generacion=ultima_generacion)
         .order_by('fecha_objetivo')
-        .values_list('demanda_predicha', flat=True)[:dias_cobertura]
+        .values('fecha_objetivo', 'demanda_predicha', 'nivel_prediccion', 'participacion_usada')[:dias_cobertura]
     )
     if not predicciones:
-        return None, None
+        return None
 
-    demanda_periodo = sum(predicciones)
-    return demanda_periodo, demanda_periodo / len(predicciones)
+    demanda_periodo = sum(p['demanda_predicha'] for p in predicciones)
+    demanda_categoria_periodo = participacion_usada = None
+    if predicciones[0]['nivel_prediccion'] == NivelPrediccion.CATEGORIA:
+        participacion_usada = predicciones[0]['participacion_usada']
+        # Suma de lo repartido a todos los productos de la categoría en las
+        # mismas fechas: es la predicción de la categoría completa (las
+        # participaciones suman 1), y no depende de que la del producto
+        # sea distinta de cero para poder despejarla.
+        demanda_categoria_periodo = Prediccion.objects.filter(
+            fecha_generacion=ultima_generacion,
+            producto__categoria=producto.categoria,
+            fecha_objetivo__in=[p['fecha_objetivo'] for p in predicciones],
+        ).aggregate(total=Sum('demanda_predicha'))['total']
+
+    return {
+        'demanda_periodo': demanda_periodo,
+        'demanda_diaria': demanda_periodo / len(predicciones),
+        'dias_horizonte': len(predicciones),
+        'demanda_categoria_periodo': demanda_categoria_periodo,
+        'participacion_usada': participacion_usada,
+    }
 
 
 def _determinar_estado(stock_actual, stock_seguridad_valor, punto_reorden_valor):
@@ -110,9 +131,11 @@ def calcular_recomendacion(producto, nivel_servicio_objetivo, dias_cobertura, de
     """Calcula todos los números para un producto y devuelve un dict listo
     para `Recomendacion.objects.create(producto=producto, **dict)`, o None
     si el producto no tiene predicciones de demanda todavía."""
-    demanda_periodo, demanda_diaria = _demanda_predicha_periodo(producto, dias_cobertura)
-    if demanda_periodo is None:
+    demanda = _demanda_predicha_periodo(producto, dias_cobertura)
+    if demanda is None:
         return None
+    demanda_periodo = demanda['demanda_periodo']
+    demanda_diaria = demanda['demanda_diaria']
 
     if desviaciones is None:
         desviaciones = calcular_desviaciones_demanda()
@@ -151,5 +174,10 @@ def calcular_recomendacion(producto, nivel_servicio_objetivo, dias_cobertura, de
         'punto_reorden': rop,
         'cantidad_sugerida': cantidad,
         'nivel_servicio_objetivo': nivel_servicio_objetivo,
+        'dias_horizonte': demanda['dias_horizonte'],
+        'demanda_categoria_periodo': demanda['demanda_categoria_periodo'],
+        'participacion_usada': demanda['participacion_usada'],
+        'lead_time_es_real': lead_time_es_real,
+        'pedidos_en_transito': en_transito,
         'explicacion': explicacion,
     }

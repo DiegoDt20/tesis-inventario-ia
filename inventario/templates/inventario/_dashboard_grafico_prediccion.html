@@ -1,28 +1,50 @@
 {% comment %}
 Tarjeta del gráfico de predicción de demanda: línea continua para el
-histórico real y punteada + sombreada para el pronóstico. Se recarga sola
-(id="tarjeta-grafico-prediccion") cuando cambia el producto elegido, sin
-tocar el resto del dashboard — ver dashboard_grafico_prediccion en
-views/dashboard.py.
+histórico real y punteada + sombreada para el pronóstico, de una categoría
+completa o de un producto suelto. Se recarga sola
+(id="tarjeta-grafico-prediccion") cuando cambia la selección, sin tocar el
+resto del dashboard — ver dashboard_grafico_prediccion en
+views/dashboard.py. El histórico y el pronóstico nunca se recortan al
+filtro de periodo del dashboard (Hoy/7 días/30 días/Personalizado): la
+serie siempre trae completos los días pronosticados hacia adelante, aunque
+excedan ese rango.
 {% endcomment %}
 <div class="card mb-4" id="tarjeta-grafico-prediccion">
     <div class="card-body">
         <div class="grafico-cabecera">
             <div>
                 <h6 class="card-title mb-1"><i class="bi bi-graph-up-arrow me-1"></i> Predicción de demanda</h6>
-                {% if producto_grafico %}
-                    <p class="text-muted small mb-0">{{ producto_grafico.codigo }} — {{ producto_grafico.nombre }} {{ producto_grafico.presentacion }}</p>
+                {% if grafico_prediccion %}
+                    <p class="text-muted small mb-0">
+                        {% if grafico_prediccion.tipo == 'categoria' %}Categoría: {% else %}Producto: {% endif %}
+                        {{ grafico_prediccion.etiqueta }}
+                    </p>
                 {% endif %}
             </div>
-            {% if productos_prediccion %}
-                <select class="form-select form-select-sm grafico-selector" name="producto_grafico"
-                        hx-get="{% url 'inventario:dashboard_grafico_prediccion' %}" hx-include="#origen"
+            {% if categorias_prediccion or productos_prediccion %}
+                <select class="form-select form-select-sm grafico-selector" name="serie_grafico"
+                        hx-get="{% url 'inventario:dashboard_grafico_prediccion' %}"
                         hx-target="#tarjeta-grafico-prediccion" hx-swap="outerHTML swap:150ms">
-                    {% for p in productos_prediccion %}
-                        <option value="{{ p.pk }}" {% if producto_grafico.pk == p.pk %}selected{% endif %}>
-                            {{ p.codigo }} — {{ p.nombre }} {{ p.presentacion }}
-                        </option>
-                    {% endfor %}
+                    {% if categorias_prediccion %}
+                        <optgroup label="Categorías">
+                            {% for c in categorias_prediccion %}
+                                <option value="categoria:{{ c.valor }}"
+                                        {% if tipo_grafico == 'categoria' and c.valor == categoria_grafico %}selected{% endif %}>
+                                    {{ c.etiqueta }}
+                                </option>
+                            {% endfor %}
+                        </optgroup>
+                    {% endif %}
+                    {% if productos_prediccion %}
+                        <optgroup label="Productos">
+                            {% for p in productos_prediccion %}
+                                <option value="producto:{{ p.pk }}"
+                                        {% if tipo_grafico == 'producto' and p.pk == producto_grafico_pk %}selected{% endif %}>
+                                    {{ p.codigo }} — {{ p.nombre }} {{ p.presentacion }}
+                                </option>
+                            {% endfor %}
+                        </optgroup>
+                    {% endif %}
                 </select>
             {% endif %}
         </div>
@@ -37,87 +59,130 @@ views/dashboard.py.
                     <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea punteada"></span> Pronóstico</span>
                     <span>Corte: {{ grafico_prediccion.fecha_corte|date:'d/m/Y' }}</span>
                 {% else %}
-                    <span>Todavía no hay un pronóstico generado para este producto. Corre <code>predecir_demanda</code>.</span>
+                    <span>
+                        Todavía no hay un pronóstico generado para
+                        {% if grafico_prediccion.tipo == 'categoria' %}esta categoría{% else %}este producto{% endif %}.
+                        Corre <code>predecir_demanda</code>.
+                    </span>
                 {% endif %}
             </div>
             <script>
                 (function () {
-                    const datos = {{ grafico_prediccion.puntos_json|safe }};
-                    const etiquetas = datos.map(function (p) { return p.fecha; });
-                    let indiceCorte = datos.findIndex(function (p) { return p.pronostico !== null; });
-                    if (indiceCorte === -1) {
-                        indiceCorte = datos.length;
+                    // dibujar() se registra en window.__graficosDibujar (ver
+                    // base.html) para poder volver a llamarse cuando cambia
+                    // el tema claro/oscuro, sin duplicar lógica ni acumular
+                    // charts huérfanos: siempre destruye el chart anterior
+                    // atado a este <canvas> (si lo hay) antes de crear uno
+                    // nuevo, igual que al cambiar de categoría/producto.
+                    function dibujar() {
+                        const lienzo = document.getElementById('grafico-prediccion-demanda');
+                        if (!lienzo) {
+                            return;
+                        }
+                        const anterior = Chart.getChart(lienzo);
+                        if (anterior) {
+                            anterior.destroy();
+                        }
+
+                        const datos = {{ grafico_prediccion.puntos_json|safe }};
+                        const etiquetas = datos.map(function (p) { return p.fecha; });
+                        let indiceCorte = datos.findIndex(function (p) { return p.pronostico !== null; });
+                        if (indiceCorte === -1) {
+                            indiceCorte = datos.length;
+                        }
+
+                        const valoresHistorico = datos.map(function (p, i) { return i < indiceCorte ? p.real : null; });
+                        const valoresPronostico = datos.map(function (p, i) {
+                            if (i < indiceCorte - 1) return null;
+                            if (i === indiceCorte - 1) return p.real;
+                            return p.pronostico;
+                        });
+
+                        // Colores leídos de las variables CSS del tema activo
+                        // (claro u oscuro): el gráfico nunca codifica su
+                        // propia paleta, así que siempre coincide con la
+                        // interfaz sin importar qué tema esté puesto.
+                        const estilos = getComputedStyle(document.documentElement);
+                        const colorAcento = estilos.getPropertyValue('--acento').trim();
+                        const colorAcentoClaro = estilos.getPropertyValue('--acento-claro').trim();
+                        const colorTexto = estilos.getPropertyValue('--texto-tenue').trim();
+                        const colorGrilla = estilos.getPropertyValue('--linea').trim();
+                        const colorMarca = estilos.getPropertyValue('--marca').trim();
+
+                        Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+                        Chart.defaults.font.size = 12;
+                        Chart.defaults.color = colorTexto;
+
+                        new Chart(lienzo, {
+                            type: 'line',
+                            data: {
+                                labels: etiquetas,
+                                datasets: [
+                                    {
+                                        label: 'Histórico real',
+                                        data: valoresHistorico,
+                                        borderColor: colorAcento,
+                                        backgroundColor: colorAcentoClaro,
+                                        fill: true,
+                                        tension: 0.3,
+                                        borderWidth: 2,
+                                        pointRadius: 0,
+                                        pointHoverRadius: 4,
+                                    },
+                                    {
+                                        label: 'Pronóstico',
+                                        data: valoresPronostico,
+                                        borderColor: colorAcento,
+                                        backgroundColor: colorAcentoClaro,
+                                        borderDash: [6, 4],
+                                        fill: true,
+                                        tension: 0.3,
+                                        borderWidth: 2,
+                                        pointRadius: 0,
+                                        pointHoverRadius: 4,
+                                    },
+                                ],
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                interaction: {mode: 'index', intersect: false},
+                                animation: {duration: 700, easing: 'easeOutQuart'},
+                                plugins: {
+                                    legend: {display: false},
+                                    tooltip: {
+                                        usePointStyle: true,
+                                        backgroundColor: colorMarca,
+                                        titleColor: '#fff',
+                                        bodyColor: 'rgba(255, 255, 255, 0.85)',
+                                        padding: 10,
+                                        cornerRadius: 8,
+                                        displayColors: false,
+                                    },
+                                },
+                                scales: {
+                                    x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 8}},
+                                    y: {
+                                        beginAtZero: true,
+                                        border: {display: false},
+                                        grid: {color: colorGrilla},
+                                    },
+                                },
+                            },
+                        });
                     }
 
-                    const valoresHistorico = datos.map(function (p, i) { return i < indiceCorte ? p.real : null; });
-                    const valoresPronostico = datos.map(function (p, i) {
-                        if (i < indiceCorte - 1) return null;
-                        if (i === indiceCorte - 1) return p.real;
-                        return p.pronostico;
-                    });
+                    window.__graficosDibujar = window.__graficosDibujar || {};
+                    window.__graficosDibujar['grafico-prediccion-demanda'] = dibujar;
 
-                    Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
-                    Chart.defaults.font.size = 12;
-                    Chart.defaults.color = 'rgba(26, 36, 57, 0.6)';
-
-                    const colorAcento = '#2f6fe0';
-
-                    new Chart(document.getElementById('grafico-prediccion-demanda'), {
-                        type: 'line',
-                        data: {
-                            labels: etiquetas,
-                            datasets: [
-                                {
-                                    label: 'Histórico real',
-                                    data: valoresHistorico,
-                                    borderColor: colorAcento,
-                                    backgroundColor: 'rgba(47, 111, 224, 0.12)',
-                                    fill: true,
-                                    tension: 0.3,
-                                    borderWidth: 2,
-                                    pointRadius: 0,
-                                    pointHoverRadius: 4,
-                                },
-                                {
-                                    label: 'Pronóstico',
-                                    data: valoresPronostico,
-                                    borderColor: colorAcento,
-                                    backgroundColor: 'rgba(47, 111, 224, 0.06)',
-                                    borderDash: [6, 4],
-                                    fill: true,
-                                    tension: 0.3,
-                                    borderWidth: 2,
-                                    pointRadius: 0,
-                                    pointHoverRadius: 4,
-                                },
-                            ],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            interaction: {mode: 'index', intersect: false},
-                            animation: {duration: 700, easing: 'easeOutQuart'},
-                            plugins: {
-                                legend: {display: false},
-                                tooltip: {
-                                    usePointStyle: true,
-                                    backgroundColor: '#101a2c',
-                                    titleColor: '#fff',
-                                    bodyColor: 'rgba(255, 255, 255, 0.85)',
-                                    padding: 10,
-                                    cornerRadius: 8,
-                                    displayColors: false,
-                                },
-                            },
-                            scales: {
-                                x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 8}},
-                                y: {
-                                    beginAtZero: true,
-                                    border: {display: false},
-                                    grid: {color: 'rgba(15, 23, 42, 0.06)'},
-                                },
-                            },
-                        },
+                    // Doble requestAnimationFrame: espera a que el navegador
+                    // termine el layout de la tarjeta recién insertada (por
+                    // htmx o en la carga inicial) antes de que Chart.js lea
+                    // el tamaño del contenedor — sin esto, el lienzo se
+                    // dibuja con un tamaño equivocado (enorme) hasta que
+                    // algo más fuerza un recálculo, como hacer zoom.
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(dibujar);
                     });
                 })();
             </script>

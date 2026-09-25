@@ -3,8 +3,9 @@ Contenido de la barra lateral: se incluye dos veces (sidebar fija en
 escritorio y offcanvas en pantallas chicas) para no duplicar el menú.
 mostrar_toggle_colapsar (solo True en la versión de escritorio) agrega el
 botón que angosta la barra a solo íconos; sidebarColapsada vive en <body>
-(ver base.html). Agrupado en secciones (GESTIÓN / INTELIGENCIA ARTIFICIAL):
-solo aparecen las pantallas que ya existen como vista real en el sistema.
+(ver base.html). Agrupado en secciones (GESTIÓN / INTELIGENCIA ARTIFICIAL /
+ANÁLISIS): solo aparecen las pantallas que ya existen como vista real en el
+sistema.
 {% endcomment %}
 <div class="sidebar-logo">
     <div class="sidebar-logo-marca">
@@ -29,16 +30,16 @@ solo aparecen las pantallas que ya existen como vista real en el sistema.
            href="{% url 'inventario:dashboard' %}" title="Dashboard">
             <i class="bi bi-grid-1x2-fill"></i> <span class="etiqueta-colapsable">Dashboard</span>
         </a>
-        <a class="nav-link {% if request.resolver_match.url_name == 'movimiento_nuevo' %}active{% endif %}"
-           href="{% url 'inventario:movimiento_nuevo' %}" title="Movimientos">
+        <a class="nav-link {% if request.resolver_match.url_name == 'movimiento_lista' or request.resolver_match.url_name == 'movimiento_nuevo' %}active{% endif %}"
+           href="{% url 'inventario:movimiento_lista' %}" title="Movimientos">
             <i class="bi bi-arrow-left-right"></i> <span class="etiqueta-colapsable">Movimientos</span>
         </a>
         <a class="nav-link {% if request.resolver_match.url_name == 'pedido_lista' or request.resolver_match.url_name == 'pedido_nuevo' %}active{% endif %}"
            href="{% url 'inventario:pedido_lista' %}" title="Pedidos">
             <i class="bi bi-cart3"></i> <span class="etiqueta-colapsable">Pedidos</span>
         </a>
-        <a class="nav-link {% if request.resolver_match.url_name == 'conteo_nuevo' %}active{% endif %}"
-           href="{% url 'inventario:conteo_nuevo' %}" title="Conteo físico">
+        <a class="nav-link {% if request.resolver_match.url_name == 'conteo_lista' or request.resolver_match.url_name == 'conteo_nuevo' %}active{% endif %}"
+           href="{% url 'inventario:conteo_lista' %}" title="Conteo físico">
             <i class="bi bi-clipboard-check"></i> <span class="etiqueta-colapsable">Conteo físico</span>
         </a>
     </div>
@@ -66,8 +67,21 @@ solo aparecen las pantallas que ya existen como vista real en el sistema.
                     <i class="bi bi-lightbulb"></i> <span class="etiqueta-colapsable">Recomendaciones</span>
                 </a>
             {% endif %}
+            <a class="nav-link {% if request.resolver_match.url_name == 'modelo_detalle' %}active{% endif %}"
+               href="{% url 'inventario:modelo_detalle' %}" title="Modelo">
+                <i class="bi bi-cpu"></i> <span class="etiqueta-colapsable">Modelo</span>
+            </a>
         </div>
     {% endif %}
+
+    <div class="sidebar-seccion">
+        <div class="sidebar-seccion-titulo etiqueta-colapsable">Análisis</div>
+
+        <a class="nav-link {% if request.resolver_match.url_name == 'reportes' %}active{% endif %}"
+           href="{% url 'inventario:reportes' %}" title="Reportes">
+            <i class="bi bi-bar-chart-line"></i> <span class="etiqueta-colapsable">Reportes</span>
+        </a>
+    </div>
 </nav>
 
 <div class="sidebar-usuario" x-data="{ menuAbierto: false }" @click.outside="menuAbierto = false">

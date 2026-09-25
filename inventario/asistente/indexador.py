@@ -99,9 +99,12 @@ def _documentos_recomendacion():
 def _documentos_anomalia():
     documentos = []
     for anomalia in Anomalia.objects.filter(revisada=False).select_related('producto'):
+        # La descripción ya no nombra el producto (en pantalla va en su
+        # propia columna); el documento del RAG sí lo necesita.
         contenido = (
             f'Anomalía sin revisar ({anomalia.get_severidad_display()}, '
-            f'{anomalia.get_tipo_display()}): {anomalia.descripcion}'
+            f'{anomalia.get_tipo_display()}) en {anomalia.producto.codigo} — '
+            f'{anomalia.producto.nombre}: {anomalia.descripcion}'
         )
         documentos.append((TipoDocumento.ANOMALIA, anomalia.pk, contenido))
     return documentos

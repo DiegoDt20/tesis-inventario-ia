@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+
+{% block titulo %}Modelo de predicción{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-cpu me-2"></i>Modelo de predicción de demanda</h1>
+<p class="titulo-pantalla-detalle">
+    Estado del modelo activo, comparación de los tres modelos y el historial completo de entrenamientos —
+    documentación técnica de la investigación, no la vista operativa del día a día.
+</p>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-cpu me-1"></i> Modelo activo</h6>
+                {% if estado_modelo.modelo %}
+                    <dl class="row mb-0 small">
+                        <dt class="col-6">Método</dt>
+                        <dd class="col-6">
+                            {{ estado_modelo.modelo.algoritmo }}
+                            ({{ estado_modelo.modelo.get_fase_display }})
+                        </dd>
+
+                        <dt class="col-6">Nivel</dt>
+                        <dd class="col-6">{{ estado_modelo.modelo.get_nivel_display }}</dd>
+
+                        <dt class="col-6">Entrenado el</dt>
+                        <dd class="col-6">{{ estado_modelo.modelo.fecha_entrenamiento|date:'d/m/Y H:i' }}</dd>
+
+                        <dt class="col-6">MAE / RMSE</dt>
+                        <dd class="col-6">
+                            {{ estado_modelo.modelo.mae|floatformat:2 }} /
+                            {{ estado_modelo.modelo.rmse|floatformat:2 }}
+                        </dd>
+
+                        <dt class="col-6">SMAPE / R²</dt>
+                        <dd class="col-6">
+                            {{ estado_modelo.modelo.smape|floatformat:4 }} /
+                            {{ estado_modelo.modelo.r2|floatformat:4 }}
+                        </dd>
+
+                        <dt class="col-6">Días de histórico interno</dt>
+                        <dd class="col-6">
+                            {% if estado_modelo.dias_historico %}{{ estado_modelo.dias_historico }} días{% else %}Sin datos{% endif %}
+                        </dd>
+
+                        {% if estado_modelo.modelo.fase == 'ajustado' %}
+                            <dt class="col-6">Origen de los datos de ajuste</dt>
+                            <dd class="col-6">
+                                {% if estado_modelo.modelo.origen_datos_internos %}
+                                    {{ estado_modelo.modelo.get_origen_datos_internos_display }}
+                                {% else %}
+                                    <span class="text-muted">No registrado</span>
+                                {% endif %}
+                            </dd>
+
+                            <dt class="col-6">Días de entrenamiento / prueba</dt>
+                            <dd class="col-6">
+                                {% if estado_modelo.modelo.dias_entrenamiento is not None %}
+                                    {{ estado_modelo.modelo.dias_entrenamiento }} / {{ estado_modelo.modelo.dias_prueba }} días
+                                {% else %}
+                                    <span class="text-muted">No registrado</span>
+                                {% endif %}
+                            </dd>
+                        {% endif %}
+                    </dl>
+                    {% if estado_modelo.fuente_metricas %}
+                        <div class="alert {% if estado_modelo.modelo.fase == 'base' %}alert-warning{% else %}alert-info{% endif %} small mt-3 mb-0 py-2">
+                            {{ estado_modelo.fuente_metricas }}
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <p class="text-muted mb-0">
+                        Todavía no hay un modelo entrenado. Corre <code>entrenar_base</code>.
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-bar-chart-steps me-1"></i> Comparación de los tres modelos</h6>
+                {% if comparacion %}
+                    <p class="text-muted small mb-3">
+                        Las cuatro métricas sobre el mismo test interno. En MAE, RMSE y SMAPE gana el valor
+                        más bajo; en R², el más alto. <i class="bi bi-trophy-fill text-success"></i> marca al
+                        ganador de cada métrica. Demuestra si la transferencia de aprendizaje aporta valor
+                        frente a no usarla.
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0 tabla-compacta">
+                            <thead>
+                                <tr>
+                                    <th>Modelo</th>
+                                    {% for metrica in comparacion.metricas %}
+                                        <th class="text-end">{{ metrica }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for fila in comparacion.filas %}
+                                    <tr>
+                                        <td>
+                                            {{ fila.nombre }}
+                                            {% if fila.es_activo %}
+                                                <span class="badge-suave badge-suave-success ms-1">
+                                                    <i class="bi bi-check-circle-fill"></i> Activo
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        {% for celda in fila.celdas %}
+                                            <td class="text-end{% if celda.gana %} fw-semibold text-success{% endif %}">
+                                                {% if celda.valor is None %}
+                                                    <span class="text-muted">—</span>
+                                                {% else %}
+                                                    {% if celda.gana %}<i class="bi bi-trophy-fill me-1" title="Gana en esta métrica"></i>{% endif %}{{ celda.valor|floatformat:celda.decimales }}
+                                                {% endif %}
+                                            </td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="estado-vacio-discreto mb-0">
+                        El modelo activo todavía no tiene la comparación de los tres modelos guardada.
+                        Corre <code>entrenar_ajustado</code>.
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-clock-history me-1"></i> Historial de modelos entrenados</h6>
+        {% if pagina.object_list %}
+            <div class="table-responsive">
+                <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                    <thead>
+                        <tr>
+                            <th>Entrenado el</th>
+                            <th>Fase</th>
+                            <th>Nivel</th>
+                            <th>Algoritmo</th>
+                            <th class="text-end">MAE</th>
+                            <th class="text-end">RMSE</th>
+                            <th class="text-end">SMAPE</th>
+                            <th class="text-end">R²</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for m in pagina %}
+                            <tr{% if m.descartado %} class="text-muted"{% endif %}>
+                                <td>{{ m.fecha_entrenamiento|date:'d/m/Y H:i' }}</td>
+                                <td>{{ m.get_fase_display }}</td>
+                                <td>{{ m.get_nivel_display }}</td>
+                                <td>{{ m.algoritmo }}</td>
+                                <td class="text-end">{{ m.mae|floatformat:2 }}</td>
+                                <td class="text-end">{{ m.rmse|floatformat:2 }}</td>
+                                <td class="text-end">
+                                    {% if m.descartado %}<span title="SMAPE no válido: modelo descartado">—</span>{% else %}{{ m.smape|floatformat:4 }}{% endif %}
+                                </td>
+                                <td class="text-end">{{ m.r2|floatformat:4 }}</td>
+                                <td>
+                                    {% if m.descartado %}
+                                        <span class="badge-suave badge-suave-danger" title="{{ m.motivo_descarte }}"><i class="bi bi-x-circle-fill"></i> Descartado</span>
+                                    {% elif m.activo %}
+                                        <span class="badge-suave badge-suave-success"><i class="bi bi-check-circle-fill"></i> Activo</span>
+                                    {% else %}
+                                        <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Reemplazado</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% include 'inventario/_paginacion.html' %}
+        {% else %}
+            <div class="estado-vacio">
+                <i class="bi bi-cpu estado-vacio-icono"></i>
+                Todavía no hay modelos entrenados.<br>
+                Corre <code>entrenar_base</code> desde la línea de comandos.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

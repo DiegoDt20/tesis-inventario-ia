@@ -1,32 +1,32 @@
 {% extends 'base.html' %}
 {% load inventario_extras l10n %}
 
-{% block titulo %}Dashboard de indicadores{% endblock %}
+{% block titulo %}Reportes{% endblock %}
 
 {% block contenido %}
-<h1 class="titulo-pantalla"><i class="bi bi-grid-1x2-fill me-2"></i>Dashboard de indicadores</h1>
+<h1 class="titulo-pantalla"><i class="bi bi-bar-chart-line me-2"></i>Reportes</h1>
 <p class="titulo-pantalla-detalle">
-    Los tres indicadores de la tesis, la predicción de demanda y lo que hoy pide atención en el catálogo.
-    La composición del catálogo y la comparación entre periodos están en <a href="{% url 'inventario:reportes' %}">Reportes</a>.
+    Composición del catálogo, demanda por producto, motivos de pedidos no atendidos y comparación de los
+    indicadores entre periodos — análisis de apoyo para la investigación, no la vista operativa del día a día.
 </p>
 
 <div class="d-flex flex-wrap align-items-end gap-3 mb-4"
      x-data="{ personalizado: {% if rango_activo == 'personalizado' %}true{% else %}false{% endif %} }">
     <div class="segmentado" role="group" aria-label="Selector de periodo">
         <a class="segmentado-opcion {% if rango_activo == 'hoy' %}active{% endif %}"
-           href="{% url 'inventario:dashboard' %}?rango=hoy"
-           hx-get="{% url 'inventario:dashboard' %}?rango=hoy"
-           hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+           href="{% url 'inventario:reportes' %}?rango=hoy"
+           hx-get="{% url 'inventario:reportes' %}?rango=hoy"
+           hx-target="#zona-resultados-reportes" hx-swap="innerHTML swap:150ms" hx-push-url="true"
            @click="personalizado = false">Hoy</a>
         <a class="segmentado-opcion {% if rango_activo == '7d' %}active{% endif %}"
-           href="{% url 'inventario:dashboard' %}?rango=7d"
-           hx-get="{% url 'inventario:dashboard' %}?rango=7d"
-           hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+           href="{% url 'inventario:reportes' %}?rango=7d"
+           hx-get="{% url 'inventario:reportes' %}?rango=7d"
+           hx-target="#zona-resultados-reportes" hx-swap="innerHTML swap:150ms" hx-push-url="true"
            @click="personalizado = false">7 días</a>
         <a class="segmentado-opcion {% if rango_activo == '30d' %}active{% endif %}"
-           href="{% url 'inventario:dashboard' %}?rango=30d"
-           hx-get="{% url 'inventario:dashboard' %}?rango=30d"
-           hx-target="#zona-resultados-dashboard" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+           href="{% url 'inventario:reportes' %}?rango=30d"
+           hx-get="{% url 'inventario:reportes' %}?rango=30d"
+           hx-target="#zona-resultados-reportes" hx-swap="innerHTML swap:150ms" hx-push-url="true"
            @click="personalizado = false">30 días</a>
         <button type="button" class="segmentado-opcion {% if rango_activo == 'personalizado' %}active{% endif %}"
                 @click="personalizado = !personalizado">
@@ -35,8 +35,8 @@
     </div>
 
     <form class="segmentado-personalizado" x-show="personalizado" x-cloak
-          hx-get="{% url 'inventario:dashboard' %}" hx-target="#zona-resultados-dashboard"
-          hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-indicator="#indicador-dashboard">
+          hx-get="{% url 'inventario:reportes' %}" hx-target="#zona-resultados-reportes"
+          hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-indicator="#indicador-reportes">
         <div>
             <label class="form-label small mb-0" for="fecha_inicio">Desde</label>
             <input type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}"
@@ -49,13 +49,13 @@
         </div>
         <button type="submit" class="btn btn-primary btn-sm">
             <i class="bi bi-arrow-repeat me-1 icono-htmx"></i>
-            <span class="spinner-border spinner-htmx" id="indicador-dashboard" aria-hidden="true"></span>
+            <span class="spinner-border spinner-htmx" id="indicador-reportes" aria-hidden="true"></span>
             Aplicar
         </button>
     </form>
 </div>
 
-<div id="zona-resultados-dashboard" class="zona-resultados">
-    {% include 'inventario/_dashboard_resultados.html' %}
+<div id="zona-resultados-reportes" class="zona-resultados">
+    {% include 'inventario/_reportes_resultados.html' %}
 </div>
 {% endblock %}

@@ -1,0 +1,314 @@
+{% load inventario_extras l10n %}
+<!-- Comparación entre periodos: la tendencia de los tres indicadores. -->
+<div class="card mb-4">
+    <div class="card-body">
+        {% if meses_evolucion < 3 %}
+            <h6 class="card-title"><i class="bi bi-arrow-left-right me-1"></i> Periodo actual contra periodo anterior</h6>
+            <p class="text-muted small mb-3">
+                Con menos de tres meses de historial todavía no hay suficientes puntos para una línea de
+                tiempo, así que se compara el periodo filtrado contra el inmediato anterior de la misma
+                duración.
+            </p>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0 tabla-compacta tabla-comparacion">
+                    <thead>
+                        <tr>
+                            <th>Indicador</th>
+                            <th class="text-end">Periodo anterior</th>
+                            <th class="text-end">Periodo actual</th>
+                            <th class="text-end">Variación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="muestra-pigmento muestra-ei"></span>Exactitud del inventario (EI)</td>
+                            <td class="text-end">{% if ei_anterior.valor is not None %}{{ ei_anterior.valor|floatformat:2 }}%{% else %}—{% endif %}</td>
+                            <td class="text-end">{% if ei.valor is not None %}{{ ei.valor|floatformat:2 }}%{% else %}—{% endif %}</td>
+                            <td class="text-end">
+                                {% if comparacion_ei and comparacion_ei.sube is not None %}
+                                    <span class="kpi-comparacion {% if comparacion_ei.mejora %}mejora{% else %}empeora{% endif %}">
+                                        <i class="bi {% if comparacion_ei.sube %}bi-arrow-up-short{% else %}bi-arrow-down-short{% endif %}"></i>
+                                        {{ comparacion_ei.variacion|floatformat:1 }}%
+                                    </span>
+                                {% elif comparacion_ei %}
+                                    <span class="kpi-comparacion neutro"><i class="bi bi-dash-lg"></i> Sin cambios</span>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><span class="muestra-pigmento muestra-ns"></span>Nivel de servicio (NS)</td>
+                            <td class="text-end">{% if ns_anterior.valor is not None %}{{ ns_anterior.valor|floatformat:2 }}%{% else %}—{% endif %}</td>
+                            <td class="text-end">{% if ns.valor is not None %}{{ ns.valor|floatformat:2 }}%{% else %}—{% endif %}</td>
+                            <td class="text-end">
+                                {% if comparacion_ns and comparacion_ns.sube is not None %}
+                                    <span class="kpi-comparacion {% if comparacion_ns.mejora %}mejora{% else %}empeora{% endif %}">
+                                        <i class="bi {% if comparacion_ns.sube %}bi-arrow-up-short{% else %}bi-arrow-down-short{% endif %}"></i>
+                                        {{ comparacion_ns.variacion|floatformat:1 }}%
+                                    </span>
+                                {% elif comparacion_ns %}
+                                    <span class="kpi-comparacion neutro"><i class="bi bi-dash-lg"></i> Sin cambios</span>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><span class="muestra-pigmento muestra-coi"></span>Costos operativos (COI)</td>
+                            <td class="text-end">{% if coi_anterior.tiene_datos %}S/ {{ coi_anterior.valor|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td class="text-end">{% if coi.tiene_datos %}S/ {{ coi.valor|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td class="text-end">
+                                {% if comparacion_coi and comparacion_coi.sube is not None %}
+                                    <span class="kpi-comparacion {% if comparacion_coi.mejora %}mejora{% else %}empeora{% endif %}">
+                                        <i class="bi {% if comparacion_coi.sube %}bi-arrow-up-short{% else %}bi-arrow-down-short{% endif %}"></i>
+                                        {{ comparacion_coi.variacion|floatformat:1 }}%
+                                    </span>
+                                {% elif comparacion_coi %}
+                                    <span class="kpi-comparacion neutro"><i class="bi bi-dash-lg"></i> Sin cambios</span>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <h6 class="card-title"><i class="bi bi-graph-up-arrow me-1"></i> Evolución mensual de los indicadores</h6>
+            <div class="lienzo-grafico">
+                <canvas id="grafico-porcentaje"></canvas>
+            </div>
+            <div class="lienzo-grafico">
+                <canvas id="grafico-coi"></canvas>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Composición del catálogo: qué se vende (categorías) y qué se pide más
+     (ranking de demanda), lado a lado. -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-palette me-1"></i> Catálogo por categoría</h6>
+                {% if distribucion_categorias.filas %}
+                    <p class="text-muted small mb-3">{{ distribucion_categorias.total }} producto(s) activos.</p>
+                    <div class="ranking">
+                        {% for f in distribucion_categorias.filas %}
+                            <div class="ranking-fila">
+                                <span class="ranking-etiqueta">{{ f.etiqueta }}</span>
+                                <span class="ranking-cifra">{{ f.total }} · {{ f.porcentaje|floatformat:0 }}%</span>
+                                <div class="ranking-pista">
+                                    <div class="ranking-relleno" style="width: {{ f.porcentaje|unlocalize }}%"></div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="estado-vacio-discreto mb-0">Todavía no hay productos activos cargados.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-graph-up me-1"></i> Productos con mayor demanda</h6>
+                {% if top_productos %}
+                    <p class="text-muted small mb-3">
+                        Unidades solicitadas del {{ fecha_inicio|date:'d/m/Y' }} al {{ fecha_fin|date:'d/m/Y' }}.
+                    </p>
+                    <div class="ranking">
+                        {% for p in top_productos %}
+                            <div class="ranking-fila">
+                                <span class="ranking-etiqueta">
+                                    <span class="ranking-codigo">{{ p.producto__codigo }}</span> — {{ p.producto__nombre }}
+                                </span>
+                                <span class="ranking-cifra">{{ p.total|floatformat:0 }} u.</span>
+                                <div class="ranking-pista">
+                                    <div class="ranking-relleno ranking-relleno-alterno" style="width: {{ p.porcentaje|unlocalize }}%"></div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="estado-vacio-discreto mb-0">No hay pedidos registrados en este periodo.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Motivos de pedidos no atendidos: explica el NS del periodo. -->
+<div class="card">
+    <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-question-circle me-1"></i> Por qué no se atendieron los pedidos</h6>
+        {% if motivos_no_atencion %}
+            <p class="text-muted small mb-3">
+                {{ motivos_no_atencion.total }} línea(s) de pedido no atendidas por completo en el periodo.
+            </p>
+            <div class="ranking">
+                {% for f in motivos_no_atencion.filas %}
+                    <div class="ranking-fila">
+                        <span class="ranking-etiqueta">{{ f.etiqueta }}</span>
+                        <span class="ranking-cifra">{{ f.total }} · {{ f.porcentaje|floatformat:0 }}%</span>
+                        <div class="ranking-pista">
+                            <div class="ranking-relleno ranking-relleno-riesgo" style="width: {{ f.porcentaje|unlocalize }}%"></div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="estado-vacio-discreto mb-0">
+                Todos los pedidos del periodo se atendieron completos.
+            </p>
+        {% endif %}
+    </div>
+</div>
+
+{% if meses_evolucion >= 3 %}
+<script>
+    // Chart.js con la paleta y la tipografía propias del sistema (leídas de
+    // las variables CSS del tema activo, nunca fijas). Dos gráficos de un
+    // solo eje cada uno (nunca un eje dual): uno para los porcentajes (EI,
+    // NS) y otro para los soles (COI), que son magnitudes distintas.
+    //
+    // dibujar() se registra en window.__graficosDibujar (ver base.html)
+    // para poder volver a llamarse cuando cambia el tema, y siempre destruye
+    // el chart anterior atado a cada <canvas> antes de crear uno nuevo.
+    (function () {
+        function dibujar() {
+            const lienzoPorcentaje = document.getElementById('grafico-porcentaje');
+            const lienzoCoi = document.getElementById('grafico-coi');
+            if (!lienzoPorcentaje || !lienzoCoi) {
+                return;
+            }
+            [lienzoPorcentaje, lienzoCoi].forEach(function (lienzo) {
+                const anterior = Chart.getChart(lienzo);
+                if (anterior) {
+                    anterior.destroy();
+                }
+            });
+
+            const estilos = getComputedStyle(document.documentElement);
+            const colorTexto = estilos.getPropertyValue('--texto-tenue').trim();
+            const colorGrilla = estilos.getPropertyValue('--linea').trim();
+            const colorMarca = estilos.getPropertyValue('--marca').trim();
+            const colorEi = estilos.getPropertyValue('--pigmento-verde').trim();
+            const colorNs = estilos.getPropertyValue('--pigmento-azul').trim();
+            const colorCoi = estilos.getPropertyValue('--pigmento-naranja').trim();
+
+            Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+            Chart.defaults.font.size = 12;
+            Chart.defaults.color = colorTexto;
+
+            const datosEvolucion = {{ evolucion_json|safe }};
+            const etiquetas = datosEvolucion.map(function (p) { return p.periodo; });
+
+            function conRelleno(color) {
+                const r = parseInt(color.slice(1, 3), 16);
+                const g = parseInt(color.slice(3, 5), 16);
+                const b = parseInt(color.slice(5, 7), 16);
+                return `rgba(${r}, ${g}, ${b}, 0.10)`;
+            }
+
+            const opcionesComunes = {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {mode: 'index', intersect: false},
+                animation: {duration: 900, easing: 'easeOutQuart'},
+                plugins: {
+                    tooltip: {
+                        usePointStyle: true,
+                        backgroundColor: colorMarca,
+                        titleColor: '#fff',
+                        bodyColor: 'rgba(255, 255, 255, 0.85)',
+                        borderWidth: 0,
+                        padding: 10,
+                        cornerRadius: 8,
+                        displayColors: true,
+                        boxPadding: 4,
+                    },
+                },
+                scales: {
+                    x: {grid: {display: false}, border: {display: false}},
+                },
+            };
+
+            function serieBase(color, valores, ejeId) {
+                return {
+                    data: valores,
+                    borderColor: color,
+                    backgroundColor: conRelleno(color),
+                    pointBackgroundColor: color,
+                    yAxisID: ejeId,
+                    tension: 0.35,
+                    fill: true,
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    pointBorderWidth: 0,
+                };
+            }
+
+            new Chart(lienzoPorcentaje, {
+                type: 'line',
+                data: {
+                    labels: etiquetas,
+                    datasets: [
+                        Object.assign({label: 'EI (%)'}, serieBase(colorEi, datosEvolucion.map(p => p.ei), 'porcentaje')),
+                        Object.assign({label: 'NS (%)'}, serieBase(colorNs, datosEvolucion.map(p => p.ns), 'porcentaje')),
+                    ],
+                },
+                options: Object.assign({}, opcionesComunes, {
+                    plugins: Object.assign({}, opcionesComunes.plugins, {
+                        legend: {position: 'bottom', labels: {usePointStyle: true, pointStyle: 'circle', boxWidth: 8, padding: 16}},
+                    }),
+                    scales: Object.assign({}, opcionesComunes.scales, {
+                        porcentaje: {
+                            type: 'linear', position: 'left', min: 0, max: 100,
+                            border: {display: false},
+                            grid: {color: colorGrilla},
+                            title: {display: true, text: '%'},
+                        },
+                    }),
+                }),
+            });
+
+            new Chart(lienzoCoi, {
+                type: 'line',
+                data: {
+                    labels: etiquetas,
+                    datasets: [
+                        Object.assign({label: 'COI (S/)'}, serieBase(colorCoi, datosEvolucion.map(p => p.coi), 'soles')),
+                    ],
+                },
+                options: Object.assign({}, opcionesComunes, {
+                    plugins: Object.assign({}, opcionesComunes.plugins, {legend: {display: false}}),
+                    scales: Object.assign({}, opcionesComunes.scales, {
+                        soles: {
+                            type: 'linear', position: 'left',
+                            border: {display: false},
+                            grid: {color: colorGrilla},
+                            title: {display: true, text: 'S/'},
+                        },
+                    }),
+                }),
+            });
+        }
+
+        window.__graficosDibujar = window.__graficosDibujar || {};
+        window.__graficosDibujar['grafico-evolucion'] = dibujar;
+
+        // Doble requestAnimationFrame: espera a que el navegador termine el
+        // layout de la zona recién insertada antes de que Chart.js lea el
+        // tamaño del contenedor — sin esto, el lienzo se dibuja con un
+        // tamaño equivocado (enorme) hasta que algo fuerza un recálculo.
+        requestAnimationFrame(function () {
+            requestAnimationFrame(dibujar);
+        });
+    })();
+</script>
+{% endif %}

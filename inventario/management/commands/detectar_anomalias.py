@@ -29,20 +29,10 @@ class Command(BaseCommand):
         hallazgos_movimientos, sin_historico = detectar_movimientos_atipicos(origen=origen)
         hallazgos = hallazgos_diferencias + hallazgos_movimientos
 
-        with transaction.atomic():
-            for hallazgo in hallazgos:
-                Anomalia.objects.create(
-                    producto_id=hallazgo.producto_id,
-                    fecha_deteccion=hallazgo.fecha_deteccion,
-                    tipo=hallazgo.tipo,
-                    severidad=hallazgo.severidad,
-                    score=hallazgo.score,
-                    valor_observado=hallazgo.valor_observado,
-                    valor_esperado=hallazgo.valor_esperado,
-                    descripcion=hallazgo.descripcion,
-                )
+        creadas, actualizadas = self._guardar(hallazgos)
 
         self.stdout.write(self.style.SUCCESS(f'\nAnomalías detectadas: {len(hallazgos)}'))
+        self.stdout.write(f'  Nuevas: {creadas} | Ya existentes, recalculadas: {actualizadas}')
         self.stdout.write(f'  Diferencias de inventario: {len(hallazgos_diferencias)}')
         self.stdout.write(f'  Movimientos atípicos:      {len(hallazgos_movimientos)}')
 
@@ -67,5 +57,45 @@ class Command(BaseCommand):
                     f'al menos 5.'
                 )
 
+        productos = Producto.objects.in_bulk({h.producto_id for h in hallazgos})
         for hallazgo in sorted(hallazgos, key=lambda h: h.score, reverse=True):
-            self.stdout.write(f'\n  [{hallazgo.severidad.upper()}] {hallazgo.descripcion}')
+            producto = productos[hallazgo.producto_id]
+            self.stdout.write(
+                f'\n  [{hallazgo.severidad.upper()}] {producto.codigo} — {producto.nombre}: '
+                f'{hallazgo.descripcion}'
+            )
+
+    @staticmethod
+    def _guardar(hallazgos):
+        """Crea las anomalías nuevas y actualiza las que ya existían para el
+        mismo ConteoDetalle o Movimiento (severidad, score, valores y
+        descripción), sin tocar su fecha de detección ni su estado de
+        revisión. Así, volver a correr el comando (p. ej. tras cambiar los
+        umbrales de severidad) no duplica anomalías ni pierde lo revisado.
+        Devuelve (creadas, actualizadas)."""
+        creadas = actualizadas = 0
+        with transaction.atomic():
+            for hallazgo in hallazgos:
+                if hallazgo.conteo_detalle_id:
+                    clave = {'tipo': hallazgo.tipo, 'conteo_detalle_id': hallazgo.conteo_detalle_id}
+                else:
+                    clave = {'tipo': hallazgo.tipo, 'movimiento_id': hallazgo.movimiento_id}
+                valores = {
+                    'severidad': hallazgo.severidad,
+                    'score': hallazgo.score,
+                    'valor_observado': hallazgo.valor_observado,
+                    'valor_esperado': hallazgo.valor_esperado,
+                    'descripcion': hallazgo.descripcion,
+                }
+                existentes = Anomalia.objects.filter(**clave)
+                if existentes.update(**valores):
+                    actualizadas += 1
+                    continue
+                Anomalia.objects.create(
+                    producto_id=hallazgo.producto_id,
+                    fecha_deteccion=hallazgo.fecha_deteccion,
+                    **clave,
+                    **valores,
+                )
+                creadas += 1
+        return creadas, actualizadas

@@ -1,14 +1,29 @@
-"""Pantalla de registro de conteos físicos."""
+"""Pantallas de registro y listado de conteos físicos."""
 from datetime import date
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Count, Q
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
 from ..models import ConteoDetalle, ConteoFisico, Origen, Producto
 from ._comunes import _parsear_fecha
+
+
+@login_required
+def conteo_lista(request):
+    """Un conteo por fila (no un producto por fila): cuántos productos se
+    contaron y cuántos quedaron con diferencia, para ver de un vistazo qué
+    conteos anteriores hay y continuar cualquiera desde aquí."""
+    qs = ConteoFisico.objects.annotate(
+        total_contados=Count('detalles'),
+        total_con_diferencia=Count('detalles', filter=~Q(detalles__diferencia=0)),
+    ).order_by('-fecha_corte', '-pk')
+    pagina = Paginator(qs, 25).get_page(request.GET.get('page'))
+    return render(request, 'inventario/conteo_lista.html', {'pagina': pagina})
 
 
 @login_required

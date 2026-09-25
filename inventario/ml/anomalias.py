@@ -7,7 +7,9 @@ a) Diferencias de inventario (detectar_diferencias_inventario): sobre
    ConteoDetalle, detecta productos cuya diferencia entre stock de sistema y
    stock físico se aleja de lo normal. Combina un Isolation Forest (sobre la
    diferencia absoluta y la diferencia relativa al stock de sistema) con una
-   regla simple: diferencia mayor al 20% del stock de sistema. Con muy pocos
+   regla simple: diferencia mayor al 20% del stock de sistema. La severidad
+   se asigna aparte, con umbrales configurables (ANOMALIA_UMBRAL_ALTA y
+   ANOMALIA_UMBRAL_MEDIA en settings). Con muy pocos
    registros (menos de MIN_REGISTROS_ISOLATION_FOREST) no tiene sentido
    ajustar un Isolation Forest, así que se usa solo la regla simple.
 
@@ -24,6 +26,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 from sklearn.ensemble import IsolationForest
 
@@ -57,15 +61,39 @@ class HallazgoAnomalia:
     valor_observado: float
     valor_esperado: float
     descripcion: str
+    # Solo lo trae detectar_movimientos_atipicos: qué Movimiento puntual
+    # disparó el hallazgo, para poder enlazarlo desde el listado de
+    # movimientos. detectar_diferencias_inventario nace de un ConteoDetalle,
+    # no de un movimiento, así que lo deja en None.
+    movimiento_id: int = None
+    # Solo lo trae detectar_diferencias_inventario: la línea del conteo
+    # físico que originó el hallazgo.
+    conteo_detalle_id: int = None
+
+
+def _numero(valor, decimales=1):
+    """Número con coma decimal, como se escribe en Perú (64.7 -> "64,7")."""
+    return f'{valor:.{decimales}f}'.replace('.', ',')
 
 
 def _severidad_diferencia(diferencia_relativa):
-    """Alta si la diferencia ya es la mitad (o más) del stock de sistema;
-    media si supera el 20% pero no llega a la mitad; baja si no llega al
-    20% y solo la marcó el Isolation Forest."""
-    if diferencia_relativa >= 0.50:
+    """Alta si la diferencia llega a ANOMALIA_UMBRAL_ALTA del stock de
+    sistema (100% por defecto) o lo supera, media desde
+    ANOMALIA_UMBRAL_MEDIA (40%) hasta ese valor, baja por debajo. Es
+    "mayor o igual" a propósito: un faltante nunca pasa del 100% (el conteo
+    físico no baja de cero), así que con "mayor que" un producto que
+    desapareció por completo quedaría como media. Los umbrales se leen de settings en
+    cada llamada para poder ajustarlos desde .env sin tocar el código."""
+    umbral_alta = settings.ANOMALIA_UMBRAL_ALTA
+    umbral_media = settings.ANOMALIA_UMBRAL_MEDIA
+    if not 0 < umbral_media < umbral_alta:
+        raise ImproperlyConfigured(
+            'Los umbrales de severidad deben cumplir 0 < ANOMALIA_UMBRAL_MEDIA < '
+            f'ANOMALIA_UMBRAL_ALTA (hoy: {umbral_media} y {umbral_alta}).'
+        )
+    if diferencia_relativa >= umbral_alta:
         return Anomalia.Severidad.ALTA
-    if diferencia_relativa > UMBRAL_DIFERENCIA_RELATIVA:
+    if diferencia_relativa >= umbral_media:
         return Anomalia.Severidad.MEDIA
     return Anomalia.Severidad.BAJA
 
@@ -108,16 +136,17 @@ def detectar_diferencias_inventario(origen=None):
         if not (pasa_regla_20_por_ciento or es_outlier_if[i]):
             continue
 
-        producto = detalle.producto
+        # Sin el producto: la pantalla ya lo muestra en su propia columna.
+        porcentaje = (
+            f'{_numero(diferencias_relativas[i] * 100)}%' if detalle.stock_sistema > 0
+            else 'sin stock en sistema'
+        )
         descripcion = (
-            f'{producto.codigo} — {producto.nombre}: el conteo físico del '
-            f'{detalle.conteo.fecha_corte:%d/%m/%Y} encontró {detalle.stock_fisico} unidades '
-            f'frente a {detalle.stock_sistema} registradas en el sistema '
-            f'(diferencia de {detalle.diferencia:+d} unidades, '
-            f'{diferencias_relativas[i] * 100:.1f}% del stock de sistema).'
+            f'Conteo del {detalle.conteo.fecha_corte:%d/%m}: {detalle.stock_fisico} físicas contra '
+            f'{detalle.stock_sistema} registradas ({detalle.diferencia:+d}, {porcentaje})'
         )
         hallazgos.append(HallazgoAnomalia(
-            producto_id=producto.pk,
+            producto_id=detalle.producto_id,
             fecha_deteccion=ahora,
             tipo=Anomalia.Tipo.DIFERENCIA_INVENTARIO,
             severidad=_severidad_diferencia(diferencias_relativas[i]),
@@ -125,6 +154,7 @@ def detectar_diferencias_inventario(origen=None):
             valor_observado=float(detalle.diferencia),
             valor_esperado=0.0,
             descripcion=descripcion,
+            conteo_detalle_id=detalle.pk,
         ))
     return hallazgos
 
@@ -179,11 +209,9 @@ def detectar_movimientos_atipicos(origen=None):
             if abs(z) < UMBRAL_Z_SCORE:
                 continue
 
-            producto = movimiento.producto
             descripcion = (
-                f'{producto.codigo} — {producto.nombre}: {movimiento.get_tipo_display().lower()} de '
-                f'{movimiento.cantidad} unidades el {timezone.localtime(movimiento.fecha):%d/%m/%Y} se '
-                f'aleja fuertemente de lo habitual (promedio histórico de {media:.1f} unidades, z = {z:.2f}).'
+                f'{movimiento.get_tipo_display()} del {timezone.localtime(movimiento.fecha):%d/%m}: '
+                f'{movimiento.cantidad} u. contra un promedio de {_numero(media)} (z = {_numero(z, 2)})'
             )
             hallazgos.append(HallazgoAnomalia(
                 producto_id=producto_id,
@@ -194,6 +222,7 @@ def detectar_movimientos_atipicos(origen=None):
                 valor_observado=float(cantidad),
                 valor_esperado=media,
                 descripcion=descripcion,
+                movimiento_id=movimiento.pk,
             ))
 
     return hallazgos, sin_historico_suficiente

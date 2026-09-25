@@ -1,11 +1,13 @@
 """Modelos del motor de predicción de demanda (entrenamiento y predicciones),
 el motor de decisiones (recomendaciones), la detección de anomalías y el
 asistente conversacional (RAG)."""
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.conf import settings
 from django.db import models
 from pgvector.django import VectorField
 
-from .operacion import Origen, Producto
+from .operacion import ConteoDetalle, Movimiento, Origen, Producto
 
 
 class NivelPrediccion(models.TextChoices):
@@ -37,6 +39,19 @@ class ModeloEntrenado(models.Model):
     # transferencia y demostrar si esta aporta valor.
     mae_linea_base = models.FloatField(null=True, blank=True)
     mae_solo_interno = models.FloatField(null=True, blank=True)
+    # Resto de métricas de la comparación de los tres modelos. Null en los
+    # modelos "base" y en ajustados entrenados antes de que existieran.
+    rmse_linea_base = models.FloatField(null=True, blank=True)
+    rmse_solo_interno = models.FloatField(null=True, blank=True)
+    smape_linea_base = models.FloatField(null=True, blank=True)
+    smape_solo_interno = models.FloatField(null=True, blank=True)
+    r2_linea_base = models.FloatField(null=True, blank=True)
+    r2_solo_interno = models.FloatField(null=True, blank=True)
+    # Un modelo descartado queda en el historial como evidencia de la
+    # investigación, pero sus métricas no son válidas (p. ej. un SMAPE
+    # desbordado) y no deben leerse como resultado.
+    descartado = models.BooleanField(default=False)
+    motivo_descarte = models.CharField(max_length=300, blank=True)
     n_registros_externos = models.IntegerField(default=0)
     n_registros_internos = models.IntegerField(default=0)
     # Solo aplica a fase="ajustado": origen de los pedidos internos usados
@@ -128,6 +143,21 @@ class Recomendacion(models.Model):
     punto_reorden = models.FloatField()
     cantidad_sugerida = models.FloatField()
     nivel_servicio_objetivo = models.FloatField()
+    # Datos de entrada que permiten auditar el cálculo desde la pantalla
+    # (el "¿Por qué?" de cada tarjeta). Null en recomendaciones generadas
+    # antes de que existieran estos campos.
+    # Días de predicción sumados en demanda_predicha_periodo (el horizonte
+    # de cobertura, o menos si el lote de predicciones no llegaba a tanto).
+    dias_horizonte = models.IntegerField(null=True, blank=True)
+    # Si la predicción fue a nivel de categoría: demanda predicha de toda la
+    # categoría en el mismo horizonte y participación histórica del producto
+    # con la que se repartió. Null si se predijo a nivel de producto.
+    demanda_categoria_periodo = models.FloatField(null=True, blank=True)
+    participacion_usada = models.FloatField(null=True, blank=True)
+    # True si lead_time_usado es el promedio real de compras recibidas;
+    # False si es el configurado en la ficha del producto.
+    lead_time_es_real = models.BooleanField(null=True, blank=True)
+    pedidos_en_transito = models.IntegerField(null=True, blank=True)
     explicacion = models.TextField()
     # None = todavía sin decisión; True/False = el usuario la siguió o no.
     # Es el dato clave para la discusión de la tesis (¿se confía en el
@@ -146,6 +176,40 @@ class Recomendacion(models.Model):
     def __str__(self):
         return f'{self.producto.codigo} - {self.get_estado_display()} ({self.fecha_generacion:%Y-%m-%d})'
 
+    @property
+    def unidades_sugeridas(self):
+        """cantidad_sugerida redondeada a unidades enteras (no se compra
+        media lata), con redondeo comercial."""
+        return int(Decimal(str(self.cantidad_sugerida)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+    @property
+    def costo_estimado(self):
+        """Unidades sugeridas por el costo de compra ACTUAL del producto (no
+        el de la fecha de generación: al aprobar la compra importa lo que
+        cuesta hoy). None si el producto no tiene costo registrado."""
+        if self.producto.costo_compra <= 0:
+            return None
+        return self.unidades_sugeridas * self.producto.costo_compra
+
+    @property
+    def demanda_diaria(self):
+        if not self.dias_horizonte:
+            return None
+        return self.demanda_predicha_periodo / self.dias_horizonte
+
+    @property
+    def participacion_pct(self):
+        return None if self.participacion_usada is None else self.participacion_usada * 100
+
+    @property
+    def dias_cobertura_compra(self):
+        """Cuántos días de demanda pronosticada cubre la compra sugerida.
+        None si no se conoce la demanda diaria o es cero."""
+        demanda_diaria = self.demanda_diaria
+        if not demanda_diaria or demanda_diaria <= 0:
+            return None
+        return self.unidades_sugeridas / demanda_diaria
+
 
 class Anomalia(models.Model):
     """Anomalía de control de existencias detectada por
@@ -162,7 +226,29 @@ class Anomalia(models.Model):
         MEDIA = 'media', 'Media'
         BAJA = 'baja', 'Baja'
 
+    class MotivoRevision(models.TextChoices):
+        """Por qué se descuadró el inventario, según quien revisó la
+        anomalía. Es la causa raíz que el objetivo 1 busca corregir."""
+        ERROR_CONTEO = 'error_conteo', 'Error de conteo'
+        INGRESO_NO_REGISTRADO = 'ingreso_no_registrado', 'Ingreso no registrado'
+        MERMA_NO_ANOTADA = 'merma_no_anotada', 'Merma no anotada'
+        OTRO = 'otro', 'Otro'
+
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='anomalias')
+    # Solo se completa para tipo=MOVIMIENTO_ATIPICO: el detector de
+    # diferencias de inventario nace de un ConteoDetalle, no de un
+    # Movimiento puntual. Permite marcar en el listado de movimientos cuál
+    # quedó señalado como atípico y enlazar directo a su anomalía.
+    movimiento = models.ForeignKey(
+        Movimiento, null=True, blank=True, on_delete=models.SET_NULL, related_name='anomalias_detectadas',
+    )
+    # Solo se completa para tipo=DIFERENCIA_INVENTARIO: la línea del conteo
+    # físico que originó la anomalía. Permite agruparlas por conteo en la
+    # pantalla y que "detectar_anomalias" actualice la misma anomalía en vez
+    # de duplicarla cuando se vuelve a correr.
+    conteo_detalle = models.ForeignKey(
+        ConteoDetalle, null=True, blank=True, on_delete=models.CASCADE, related_name='anomalias',
+    )
     fecha_deteccion = models.DateTimeField(db_index=True)
     tipo = models.CharField(max_length=25, choices=Tipo.choices, db_index=True)
     severidad = models.CharField(max_length=10, choices=Severidad.choices, db_index=True)
@@ -174,6 +260,9 @@ class Anomalia(models.Model):
     descripcion = models.TextField()
     revisada = models.BooleanField(default=False)
     fecha_revision = models.DateTimeField(null=True, blank=True)
+    # Opcionales: se piden al marcar como revisada.
+    motivo_revision = models.CharField(max_length=25, choices=MotivoRevision.choices, blank=True, db_index=True)
+    detalle_revision = models.CharField(max_length=200, blank=True)
 
     class Meta:
         verbose_name = 'Anomalía'

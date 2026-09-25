@@ -1,0 +1,63 @@
+{% load inventario_extras %}
+{% if pagina.object_list %}
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Producto</th>
+                        <th>Tipo</th>
+                        <th class="text-end">Cantidad</th>
+                        <th class="text-end">Stock resultante</th>
+                        <th>Documento</th>
+                        <th>Motivo</th>
+                        <th>Usuario</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in pagina %}
+                        {% with anomalia=m.anomalias_detectadas.all|first %}
+                            <tr {% if anomalia %}class="fila-atipica"{% endif %}>
+                                <td>{{ m.fecha|date:'d/m/Y H:i' }}</td>
+                                <td>{{ m.producto.codigo }} — {{ m.producto.nombre }}</td>
+                                <td>{{ m.get_tipo_display }}</td>
+                                <td class="text-end">{{ m.cantidad }}</td>
+                                <td class="text-end">
+                                    {% if m.stock_resultante is not None %}{{ m.stock_resultante }}{% else %}—{% endif %}
+                                </td>
+                                <td>{{ m.documento|default:'—' }}</td>
+                                <td>{{ m.motivo|default:'—' }}</td>
+                                <td>{{ m.usuario.username }}</td>
+                                <td>
+                                    {% if anomalia %}
+                                        <a href="{% url 'inventario:anomalias_lista' %}"
+                                           class="badge-suave badge-suave-{{ anomalia.severidad|color_estado }} text-decoration-none"
+                                           title="{{ anomalia.descripcion }}">
+                                            <i class="bi bi-shield-exclamation"></i> Atípico
+                                        </a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endwith %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include 'inventario/_paginacion.html' with hx_target='#zona-resultados-movimientos' %}
+{% else %}
+    <div class="card">
+        <div class="estado-vacio">
+            <i class="bi bi-arrow-left-right estado-vacio-icono"></i>
+            {% if tipo or producto_texto or fecha_inicio or fecha_fin %}
+                No hay movimientos que coincidan con ese filtro.
+                <a href="{% url 'inventario:movimiento_lista' %}">Quita el filtro</a> para ver todos.
+            {% else %}
+                Todavía no hay movimientos registrados.
+                <a href="{% url 'inventario:movimiento_nuevo' %}">Registra el primero</a>.
+            {% endif %}
+        </div>
+    </div>
+{% endif %}

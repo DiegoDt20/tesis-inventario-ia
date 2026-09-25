@@ -10,7 +10,38 @@
 </p>
 
 {% if fecha_generacion %}
-    <p class="text-muted small mb-4"><i class="bi bi-clock-history me-1"></i>Última corrida: {{ fecha_generacion|date:'d/m/Y H:i' }}</p>
+    {% if corrida_desactualizada %}
+        <p class="small mb-3 text-danger fw-semibold">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>Última corrida: {{ fecha_generacion|date:'d/m/Y H:i' }}
+            (hace {{ dias_desde_corrida }} días). Con más de {{ dias_corrida_vigente }} días, las cifras ya no reflejan
+            el stock ni la demanda actuales: pide que se vuelva a correr <code>generar_recomendaciones</code>.
+        </p>
+    {% else %}
+        <p class="text-muted small mb-3"><i class="bi bi-clock-history me-1"></i>Última corrida: {{ fecha_generacion|date:'d/m/Y H:i' }}</p>
+    {% endif %}
+{% endif %}
+
+{% if resumen %}
+    <div class="card mb-4">
+        <div class="card-body d-flex flex-wrap align-items-center gap-3">
+            {% for e in resumen.estados %}
+                <span class="badge-suave badge-suave-{{ e.valor|color_estado }} resumen-estado">
+                    <i class="bi {{ e.valor|icono_estado }}"></i>
+                    <strong>{{ e.total }}</strong> {{ e.etiqueta }}
+                </span>
+            {% endfor %}
+            <div class="ms-md-auto text-md-end">
+                <div class="small text-muted">Costo si se aceptaran las {{ resumen.total_criticas }} críticas</div>
+                <div class="fs-5 fw-semibold">S/ {{ resumen.costo_criticas|floatformat:'2g' }}</div>
+                {% if resumen.criticas_sin_costo %}
+                    <div class="small text-danger">
+                        <i class="bi bi-exclamation-circle me-1"></i>{{ resumen.criticas_sin_costo }}
+                        crítica{{ resumen.criticas_sin_costo|pluralize }} sin costo de compra registrado, no incluida{{ resumen.criticas_sin_costo|pluralize }}.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 {% endif %}
 
 <div id="zona-resultados-recomendaciones" class="zona-resultados">

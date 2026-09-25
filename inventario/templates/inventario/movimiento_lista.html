@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% load inventario_extras %}
+
+{% block titulo %}Movimientos{% endblock %}
+
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h1 class="titulo-pantalla"><i class="bi bi-arrow-left-right me-2"></i>Movimientos</h1>
+        <p class="titulo-pantalla-detalle">Ingresos, salidas y ajustes de stock, con lo que el detector de anomalías señaló.</p>
+    </div>
+    <a href="{% url 'inventario:movimiento_nuevo' %}" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i>Nuevo movimiento
+    </a>
+</div>
+
+{% include 'inventario/_lista_productos.html' %}
+
+<form class="row g-2 align-items-end mb-3"
+      hx-get="{% url 'inventario:movimiento_lista' %}" hx-target="#zona-resultados-movimientos"
+      hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-indicator="#indicador-filtro-movimientos">
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="tipo">Tipo</label>
+        <select id="tipo" name="tipo" class="form-select form-select-sm">
+            <option value="">Todos</option>
+            {% for valor, etiqueta in tipos %}
+                <option value="{{ valor }}" {% if tipo == valor %}selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="producto">Producto</label>
+        <input type="text" id="producto" name="producto" value="{{ producto_texto }}"
+               list="lista-productos" class="form-control form-control-sm" placeholder="Código o nombre" autocomplete="off">
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="fecha_inicio">Desde</label>
+        <input type="date" id="fecha_inicio" name="fecha_inicio" value="{{ fecha_inicio|date:'Y-m-d' }}" class="form-control form-control-sm">
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="fecha_fin">Hasta</label>
+        <input type="date" id="fecha_fin" name="fecha_fin" value="{{ fecha_fin|date:'Y-m-d' }}" class="form-control form-control-sm">
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-funnel me-1 icono-htmx"></i>
+            <span class="spinner-border spinner-htmx" id="indicador-filtro-movimientos" aria-hidden="true"></span>
+            Filtrar
+        </button>
+        <a href="{% url 'inventario:movimiento_lista' %}" class="btn btn-outline-secondary btn-sm"
+           hx-get="{% url 'inventario:movimiento_lista' %}" hx-target="#zona-resultados-movimientos"
+           hx-swap="innerHTML swap:150ms" hx-push-url="true">
+            <i class="bi bi-x-lg me-1"></i>Limpiar
+        </a>
+    </div>
+</form>
+
+<div id="zona-resultados-movimientos" class="zona-resultados">
+    {% include 'inventario/_movimiento_lista_resultados.html' %}
+</div>
+{% endblock %}

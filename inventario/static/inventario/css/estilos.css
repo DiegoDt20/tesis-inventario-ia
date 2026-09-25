@@ -43,12 +43,21 @@
     --linea: rgba(15, 23, 42, 0.08);
     --linea-fuerte: rgba(15, 23, 42, 0.14);
 
-    /* Tinta: el único tono oscuro del sistema, reservado para texto de alto
-       contraste y un puñado de elementos estructurales (logo, navegación
-       activa, cabecera del asistente) — nunca para fondo de página. */
+    /* Tinta: texto de alto contraste (títulos, cifras de las tarjetas KPI).
+       Se invierte entre temas (oscura sobre fondo claro, clara sobre fondo
+       oscuro) — nunca es un color de fondo. */
     --tinta: #101a2c;
     --texto: #1a2439;
     --texto-tenue: #5b6779;
+
+    /* Marca: el chip de acento del sistema (logo de la barra lateral, ícono
+       del título de pantalla, navegación activa, cabecera del asistente,
+       panel de marca del login) — siempre combinado con texto blanco
+       encima. A diferencia de --tinta, no es "el texto invertido del tema":
+       es la identidad visual propia del sistema, un azul-tinta oscuro en
+       ambos temas (el tema oscuro solo lo aclara un punto para que siga
+       leyéndose como un chip distinto sobre un fondo ya oscuro). */
+    --marca: #101a2c;
 
     /* Acento único para interacción (enlaces, botón principal, foco,
        control segmentado activo). Es el mismo tono que el pigmento de
@@ -113,6 +122,81 @@
     --bs-focus-ring-color: rgba(var(--acento-rgb), 0.25);
 }
 
+/* ------------------------------------------------------------------ */
+/* Tema oscuro: preferencia del usuario (botón en la barra superior,
+   guardada en localStorage; ver base.html), no una inversión mecánica del
+   tema claro. Misma paleta semántica (verde = EI/correcto, azul =
+   NS/acento, naranja = COI/atención, rojo = crítico) pero en sus tonos
+   luminosos — pensados para leerse sobre fondo oscuro, igual que unas
+   muestras de pigmento bajo luz de taller en vez de luz de mesa de trabajo.
+   Todo lo demás (--marca, tipografías, radios, espaciados) es fijo y no se
+   redefine aquí: la identidad del sistema no cambia con el tema, solo su
+   iluminación. */
+:root[data-theme="dark"] {
+    --fondo: #0b1220;
+    --superficie: #131d30;
+    --superficie-hundida: #0d1526;
+    --linea: rgba(255, 255, 255, 0.08);
+    --linea-fuerte: rgba(255, 255, 255, 0.16);
+
+    --tinta: #eef2f8;
+    --texto: #dbe1ea;
+    --texto-tenue: #8b96a8;
+
+    /* El chip de marca se aclara un punto respecto al claro (mismo azul-
+       tinta, no uno nuevo) para que siga leyéndose como un chip distinto
+       sobre un fondo ya oscuro, en vez de fundirse con él. */
+    --marca: #1b2a44;
+
+    --acento: #5b8def;
+    --acento-rgb: 91, 141, 239;
+    --acento-oscuro: #82a8f2;
+    --acento-claro: rgba(91, 141, 239, 0.16);
+    --glow-acento: 0 0 0 3px rgba(91, 141, 239, 0.28);
+
+    --pigmento-verde: #2ecf96;
+    --pigmento-verde-rgb: 46, 207, 150;
+    --pigmento-azul: #5b8def;
+    --pigmento-azul-rgb: 91, 141, 239;
+    --pigmento-naranja: #f0a344;
+    --pigmento-naranja-rgb: 240, 163, 68;
+    --pigmento-rojo: #ff6b6b;
+    --pigmento-rojo-rgb: 255, 107, 107;
+    --pigmento-pizarra: #93a1b5;
+    --pigmento-pizarra-rgb: 147, 161, 181;
+
+    /* Sombra de tarjeta: sobre fondo oscuro un halo gris no se ve, así que
+       en vez de una sombra "hacia afuera" se marca la tarjeta con un
+       reflejo interior sutil arriba (como luz rasante) y una sombra bien
+       oscura debajo para separarla del fondo. */
+    --sombra-tarjeta: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 32px -12px rgba(0, 0, 0, 0.55);
+    --sombra-media: 0 24px 48px -12px rgba(0, 0, 0, 0.65);
+
+    --bs-box-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme="dark"] body {
+    /* Misma retícula de puntos que el tema claro, en blanco sobre fondo
+       oscuro en vez de tinta sobre fondo claro. */
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+
+:root[data-theme="dark"] .form-select {
+    /* El caret de Bootstrap es un SVG con el color de trazo fijo en el
+       propio data URI: no hereda "currentColor", así que hay que redibujarlo
+       en el tono claro del tema oscuro para que no desaparezca sobre el
+       fondo hundido oscuro del campo. */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23dbe1ea' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+}
+
+:root[data-theme="dark"] .input-group-text.bg-white {
+    /* El login usa la utilidad "bg-white" de Bootstrap (!important) para
+       los íconos de usuario/contraseña, pensada para el tema claro; en
+       oscuro se vería como un recuadro blanco suelto sobre la tarjeta. */
+    background-color: var(--superficie-hundida) !important;
+    color: var(--texto-tenue);
+}
+
 /* Alpine oculta [x-cloak] apenas se inicializa, pero hasta ese instante el
    navegador ya pintó el HTML crudo; sin esta regla se ve un parpadeo del
    contenido que depende de x-show/x-transition. */
@@ -174,7 +258,7 @@ h1, h2, h3, h4, h5, h6 {
     justify-content: center;
     width: 2.25rem;
     height: 2.25rem;
-    background-color: var(--tinta);
+    background-color: var(--marca);
     color: #fff;
     border-radius: var(--radio-borde-sm);
     font-size: 1.05rem;
@@ -457,6 +541,26 @@ a {
     line-height: 1;
 }
 
+.topbar-boton-tema {
+    border: none;
+    background: transparent;
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: var(--radio-borde-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    color: var(--texto-tenue);
+    flex-shrink: 0;
+    transition: background-color var(--transicion-base), color var(--transicion-base);
+}
+
+.topbar-boton-tema:hover {
+    background-color: var(--superficie-hundida);
+    color: var(--texto);
+}
+
 .buscador-global {
     position: relative;
     flex: 1 1 420px;
@@ -604,7 +708,7 @@ a.buscador-fila:hover {
     width: 2.3rem;
     height: 2.3rem;
     border-radius: 0.65rem;
-    background-color: var(--tinta);
+    background-color: var(--marca);
     color: #fff;
     display: flex;
     align-items: center;
@@ -682,7 +786,7 @@ a.buscador-fila:hover {
 
 .sidebar-nav .nav-link.active {
     color: #fff;
-    background-color: var(--tinta);
+    background-color: var(--marca);
     font-weight: 600;
 }
 
@@ -1361,6 +1465,62 @@ a.buscador-fila:hover {
     background-color: var(--superficie-hundida) !important;
 }
 
+/* Fila de movimiento que el detector de anomalías marcó como atípico:
+   mismo mecanismo que el resaltado por hover/franjas de la tabla (una
+   variable de Bootstrap), así conviven sin pelearse por el fondo. */
+.fila-atipica > * {
+    --bs-table-accent-bg: rgba(var(--pigmento-rojo-rgb), 0.08);
+}
+
+/* ------------------------------------------------------------------ */
+/* Contexto del producto elegido en el formulario de movimiento: cifras
+   rápidas (stock actual/mínimo/categoría) y sus últimos movimientos. */
+/* ------------------------------------------------------------------ */
+
+.contexto-producto-cifras {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--espacio-4);
+}
+
+.contexto-producto-etiqueta {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--texto-tenue);
+}
+
+.contexto-producto-valor {
+    display: block;
+    font-family: var(--fuente-mono);
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--tinta);
+    font-variant-numeric: tabular-nums;
+}
+
+.contexto-producto-valor-texto {
+    font-family: var(--fuente-base);
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.contexto-producto-historial {
+    margin-top: var(--espacio-3);
+    padding-top: var(--espacio-2);
+    border-top: 1px solid var(--linea);
+}
+
+.contexto-producto-fila {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--espacio-2);
+    font-size: 0.85rem;
+    padding: 0.2rem 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Comparación de periodos (menos de tres meses en el rango filtrado). */
 /* ------------------------------------------------------------------ */
@@ -1457,7 +1617,7 @@ a.buscador-fila:hover {
     overflow: hidden;
     background:
         radial-gradient(circle at 20% 15%, rgba(var(--acento-rgb), 0.22), transparent 45%),
-        var(--tinta);
+        var(--marca);
     color: rgba(255, 255, 255, 0.88);
     padding: var(--espacio-5);
     display: flex;
@@ -1778,7 +1938,7 @@ a.buscador-fila:hover {
     width: 3.5rem;
     height: 3.5rem;
     border-radius: 50%;
-    background-color: var(--tinta);
+    background-color: var(--marca);
     color: #fff;
     border: none;
     display: flex;
@@ -1816,7 +1976,7 @@ a.buscador-fila:hover {
     align-items: center;
     justify-content: space-between;
     padding: 0.85rem 1rem;
-    background-color: var(--tinta);
+    background-color: var(--marca);
     color: #fff;
     font-weight: 600;
     font-size: 0.92rem;
@@ -1976,4 +2136,55 @@ tr.htmx-swapping,
     display: flex;
     justify-content: flex-end;
     gap: var(--espacio-2);
+}
+
+/* Anomalías: encabezado de cada conteo físico, diferencia con signo y
+   color (verde = sobra, rojo = falta) y columna de selección múltiple. */
+.tabla-anomalias .fila-grupo > td {
+    background-color: var(--superficie-hundida);
+    border-top: 2px solid var(--bs-border-color);
+}
+
+.tabla-anomalias .columna-check {
+    width: 2rem;
+}
+
+.diferencia-sobra {
+    color: var(--pigmento-verde);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.diferencia-falta {
+    color: var(--pigmento-rojo);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.enlace-orden {
+    color: inherit;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+/* Recomendaciones: línea esencial de cada tarjeta y detalle del "¿Por qué?". */
+.recomendacion-resumen {
+    font-variant-numeric: tabular-nums;
+}
+
+.recomendacion-resumen .separador {
+    color: var(--bs-secondary-color);
+    margin: 0 0.35rem;
+}
+
+.lista-por-que dt {
+    font-weight: 600;
+}
+
+.lista-por-que dd {
+    margin-bottom: 0.35rem;
+}
+
+.resumen-estado {
+    font-size: 0.9rem;
 }

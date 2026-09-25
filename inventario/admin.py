@@ -70,7 +70,7 @@ class CompraAdmin(admin.ModelAdmin):
 
 @admin.register(Movimiento)
 class MovimientoAdmin(admin.ModelAdmin):
-    list_display = ('producto', 'tipo', 'cantidad', 'fecha', 'documento', 'usuario', 'origen')
+    list_display = ('producto', 'tipo', 'cantidad', 'stock_resultante', 'fecha', 'documento', 'usuario', 'origen')
     list_filter = ('tipo', 'fecha', 'origen')
     search_fields = ('producto__codigo', 'producto__nombre', 'documento', 'motivo')
     date_hierarchy = 'fecha'
@@ -128,9 +128,9 @@ class CostoAlmacenamientoAdmin(admin.ModelAdmin):
 class ModeloEntrenadoAdmin(admin.ModelAdmin):
     list_display = (
         'fase', 'nivel', 'fecha_entrenamiento', 'algoritmo', 'mae', 'rmse', 'smape',
-        'r2', 'mae_linea_base', 'mae_solo_interno', 'activo',
+        'r2', 'mae_linea_base', 'mae_solo_interno', 'activo', 'descartado',
     )
-    list_filter = ('fase', 'nivel', 'activo')
+    list_filter = ('fase', 'nivel', 'activo', 'descartado')
     readonly_fields = ('fecha_entrenamiento',)
     date_hierarchy = 'fecha_entrenamiento'
 
@@ -172,10 +172,11 @@ class RecomendacionAdmin(admin.ModelAdmin):
 @admin.register(Anomalia)
 class AnomaliaAdmin(admin.ModelAdmin):
     list_display = (
-        'producto', 'tipo', 'severidad', 'score', 'valor_observado',
-        'valor_esperado', 'revisada', 'fecha_deteccion',
+        'producto', 'movimiento', 'tipo', 'severidad', 'score', 'valor_observado',
+        'valor_esperado', 'revisada', 'motivo_revision', 'fecha_deteccion',
     )
-    list_filter = ('tipo', 'severidad', 'revisada')
+    list_filter = ('tipo', 'severidad', 'revisada', 'motivo_revision')
+    raw_id_fields = ('movimiento', 'conteo_detalle')
     search_fields = ('producto__codigo', 'producto__nombre', 'descripcion')
     readonly_fields = ('fecha_deteccion',)
     date_hierarchy = 'fecha_deteccion'

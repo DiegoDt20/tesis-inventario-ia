@@ -1,81 +1,20 @@
-"""Pantalla de indicadores (para la tesis): EI, NS, COI, estado del modelo
-de predicción activo, recomendaciones urgentes y anomalías sin revisar."""
+"""Pantalla operativa del día a día (para el dueño del negocio): los tres
+indicadores de la tesis, la predicción de demanda, la recomendación más
+urgente, la salud del catálogo y lo que hoy pide atención (reposición,
+anomalías). El uso técnico/de investigación (modelo de predicción, reportes
+de composición y comparación entre periodos) vive aparte, en /modelo y
+/reportes — ver views/modelo.py y views/reportes.py."""
 import json
 from datetime import date, timedelta
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Case, Count, IntegerField, Max, Min, Sum, When
+from django.db.models import Case, Count, IntegerField, Max, Sum, When
 from django.shortcuts import render
 
-from ..models import Anomalia, Categoria, ModeloEntrenado, PedidoDetalle, Prediccion, Producto, Recomendacion
-from ..servicios.indicadores import (
-    calcular_coi,
-    calcular_ei,
-    calcular_ns,
-    hay_mezcla_de_origenes,
-    rango_disponible,
-    serie_mensual,
-)
-from ._comunes import _parsear_fecha, _parsear_origen
+from ..models import Anomalia, Categoria, PedidoDetalle, Prediccion, Producto, Recomendacion
+from ..servicios.indicadores import calcular_coi, calcular_ei, calcular_ns
+from ._comunes import _origen_o_defecto, _variacion_periodo, resolver_rango_periodo
 from .anomalias import _anomalias_no_revisadas
-
-
-def _variacion_periodo(valor_actual, valor_anterior, mejor_si_sube=True):
-    """Compara un indicador contra el mismo periodo anterior (misma
-    duración, inmediatamente antes del rango mostrado). Devuelve None si no
-    hay con qué comparar (falta alguno de los dos valores, o el anterior es
-    0 y no se puede calcular un porcentaje). Si hay comparación, devuelve
-    un dict con la variación en porcentaje (siempre positiva: la dirección
-    va aparte) y si esa variación es una mejora o un empeoramiento — EI y
-    NS mejoran subiendo, COI mejora bajando, así que la misma flecha hacia
-    arriba es buena para uno y mala para otro."""
-    if valor_actual is None or valor_anterior is None or valor_anterior == 0:
-        return None
-    variacion = ((valor_actual - valor_anterior) / abs(valor_anterior)) * 100
-    if variacion == 0:
-        return {'variacion': 0.0, 'sube': None, 'mejora': None}
-    sube = variacion > 0
-    return {'variacion': abs(variacion), 'sube': sube, 'mejora': sube == mejor_si_sube}
-
-
-def _estado_modelo_activo(origen):
-    """Panel de estado del modelo activo: prioriza el ajustado (transferencia
-    ya aplicada) y cae al base si todavía no hay uno ajustado."""
-    modelo = (
-        ModeloEntrenado.objects.filter(fase=ModeloEntrenado.Fase.AJUSTADO, activo=True).first()
-        or ModeloEntrenado.objects.filter(fase=ModeloEntrenado.Fase.BASE, activo=True).first()
-    )
-
-    detalles_qs = PedidoDetalle.objects.all()
-    if origen:
-        detalles_qs = detalles_qs.filter(pedido__origen=origen)
-    rango = detalles_qs.aggregate(
-        minimo=Min('pedido__fecha_solicitud'), maximo=Max('pedido__fecha_solicitud'),
-    )
-    dias_historico = None
-    if rango['minimo'] and rango['maximo']:
-        dias_historico = (rango['maximo'].date() - rango['minimo'].date()).days + 1
-
-    # Para no inducir a error: las métricas de un modelo "base" se
-    # midieron sobre el dataset externo de Kaggle, no sobre la
-    # microempresa; solo las de un modelo "ajustado" son sobre datos
-    # internos reales.
-    fuente_metricas = None
-    if modelo and modelo.fase == ModeloEntrenado.Fase.BASE:
-        fuente_metricas = (
-            'Estas métricas se midieron sobre el dataset externo de Kaggle '
-            '(Store Item Demand Forecasting Challenge), no sobre datos de la microempresa.'
-        )
-    elif modelo and modelo.fase == ModeloEntrenado.Fase.AJUSTADO:
-        if modelo.origen_datos_internos:
-            fuente_metricas = (
-                'Estas métricas se midieron sobre los datos internos de la microempresa '
-                f'(origen: {modelo.get_origen_datos_internos_display()}).'
-            )
-        else:
-            fuente_metricas = 'Estas métricas se midieron sobre los datos internos de la microempresa.'
-
-    return {'modelo': modelo, 'dias_historico': dias_historico, 'fuente_metricas': fuente_metricas}
 
 
 def _recomendaciones_urgentes(origen):
@@ -104,22 +43,6 @@ def _recomendaciones_urgentes(origen):
         qs.select_related('producto').annotate(orden_urgencia=orden_urgencia)
         .order_by('orden_urgencia', '-cantidad_sugerida')
     )
-
-
-def _distribucion_categorias(origen):
-    """Cuántos productos activos hay por categoría comercial (Producto.categoria),
-    de mayor a menor, para el panel "catálogo por categoría" del dashboard.
-    Es una lectura de composición del catálogo, no un indicador de la tesis."""
-    qs = Producto.objects.filter(activo=True)
-    if origen:
-        qs = qs.filter(origen=origen)
-    filas = list(qs.values('categoria').annotate(total=Count('id')).order_by('-total'))
-    total_general = sum(f['total'] for f in filas) or 1
-    etiquetas = dict(Categoria.choices)
-    for f in filas:
-        f['etiqueta'] = etiquetas.get(f['categoria'], f['categoria'])
-        f['porcentaje'] = f['total'] / total_general * 100
-    return {'total': total_general, 'filas': filas}
 
 
 def _salud_catalogo(origen):
@@ -163,9 +86,11 @@ def _salud_catalogo(origen):
 
 
 def _anomalias_por_severidad(origen):
-    """Cuántas anomalías sin revisar hay por severidad (alta/media/baja),
-    para la barra apilada del dashboard. Mismo dato que
-    _anomalias_no_revisadas, solo que agregado en vez de listado."""
+    """Cuántas anomalías sin revisar hay por severidad (alta/media/baja):
+    solo el conteo, para el resumen en la cabecera de la tabla de anomalías
+    del dashboard (antes era además una barra apilada aparte, que duplicaba
+    la misma información que ya muestra la columna "Severidad" de la
+    tabla)."""
     qs = Anomalia.objects.filter(revisada=False)
     if origen:
         qs = qs.filter(producto__origen=origen)
@@ -179,61 +104,10 @@ def _anomalias_por_severidad(origen):
 
     orden = [Anomalia.Severidad.ALTA, Anomalia.Severidad.MEDIA, Anomalia.Severidad.BAJA]
     segmentos = [
-        {
-            'severidad': severidad,
-            'etiqueta': Anomalia.Severidad(severidad).label,
-            'total': conteos[severidad],
-            'porcentaje': conteos[severidad] / total * 100,
-        }
+        {'severidad': severidad, 'etiqueta': Anomalia.Severidad(severidad).label, 'total': conteos[severidad]}
         for severidad in orden if conteos[severidad]
     ]
     return {'total': total, 'segmentos': segmentos}
-
-
-def _top_productos_demanda(fecha_inicio, fecha_fin, origen, limite=7):
-    """Productos con más unidades solicitadas en el rango (suma de
-    PedidoDetalle.cantidad_solicitada, la misma fuente que usa el motor de
-    predicción para la demanda real), para el ranking del dashboard."""
-    qs = PedidoDetalle.objects.filter(
-        pedido__fecha_solicitud__date__gte=fecha_inicio,
-        pedido__fecha_solicitud__date__lte=fecha_fin,
-    )
-    if origen:
-        qs = qs.filter(pedido__origen=origen)
-
-    filas = list(
-        qs.values('producto__codigo', 'producto__nombre')
-        .annotate(total=Sum('cantidad_solicitada'))
-        .order_by('-total')[:limite]
-    )
-    maximo = filas[0]['total'] if filas else 0
-    for f in filas:
-        f['porcentaje'] = (f['total'] / maximo * 100) if maximo else 0
-    return filas
-
-
-def _motivos_no_atencion(fecha_inicio, fecha_fin, origen):
-    """Por qué no se atendieron completas las líneas de pedido del rango
-    (PedidoDetalle.motivo_no_atencion), de más a menos frecuente. Explica
-    el NS del periodo en vez de solo mostrar el porcentaje."""
-    qs = PedidoDetalle.objects.filter(
-        motivo_no_atencion__isnull=False,
-        pedido__fecha_solicitud__date__gte=fecha_inicio,
-        pedido__fecha_solicitud__date__lte=fecha_fin,
-    )
-    if origen:
-        qs = qs.filter(pedido__origen=origen)
-
-    filas = list(qs.values('motivo_no_atencion').annotate(total=Count('id')).order_by('-total'))
-    total = sum(f['total'] for f in filas)
-    if not total:
-        return None
-
-    etiquetas = dict(PedidoDetalle.MotivoNoAtencion.choices)
-    for f in filas:
-        f['etiqueta'] = etiquetas.get(f['motivo_no_atencion'], f['motivo_no_atencion'])
-        f['porcentaje'] = f['total'] / total * 100
-    return {'total': total, 'filas': filas}
 
 
 def _productos_con_prediccion(origen):
@@ -245,54 +119,142 @@ def _productos_con_prediccion(origen):
     return list(qs.distinct().order_by('nombre'))
 
 
-def _elegir_producto_grafico(productos_prediccion, producto_id, top_productos):
-    """El producto a mostrar en el gráfico: el pedido explícitamente por
-    query string si es válido; si no, el de mayor demanda del periodo que
-    tenga predicción; si ninguno la tiene, el primero de la lista."""
-    if not productos_prediccion:
-        return None
-    if producto_id:
-        coincidencia = next((p for p in productos_prediccion if str(p.pk) == producto_id), None)
-        if coincidencia:
-            return coincidencia
-    codigos_top = [f['producto__codigo'] for f in top_productos]
-    for codigo in codigos_top:
-        coincidencia = next((p for p in productos_prediccion if p.codigo == codigo), None)
-        if coincidencia:
-            return coincidencia
-    return productos_prediccion[0]
+def _ultima_prediccion_por_producto(productos_ids):
+    """{producto_id: fecha_generacion de su lote más reciente}, para no
+    mezclar corridas de "predecir_demanda" distintas al sumar por
+    categoría (cada producto aporta solo su propio último lote)."""
+    return dict(
+        Prediccion.objects.filter(producto_id__in=productos_ids)
+        .values('producto_id').annotate(ultima=Max('fecha_generacion'))
+        .values_list('producto_id', 'ultima')
+    )
 
 
-def grafico_prediccion_demanda(producto, origen):
+def _categorias_con_prediccion(origen):
+    """Categorías con al menos un producto con predicción, con su demanda
+    pronosticada total (sumando el último lote de cada producto que la
+    compone — la misma agrupación por Producto.categoria que usa
+    inventario/ml/carga_interna.py para entrenar por categoría cuando
+    ningún producto por sí solo tiene histórico suficiente). Ordenadas de
+    mayor a menor demanda: el selector del gráfico abre siempre con la
+    primera de esta lista."""
+    productos = _productos_con_prediccion(origen)
+    if not productos:
+        return []
+    categoria_por_producto = {p.pk: p.categoria for p in productos}
+    ids = list(categoria_por_producto)
+    ultimas_por_producto = _ultima_prediccion_por_producto(ids)
+
+    totales = {}
+    filas = (
+        Prediccion.objects.filter(producto_id__in=ids)
+        .values('producto_id', 'fecha_generacion')
+        .annotate(total=Sum('demanda_predicha'))
+    )
+    for fila in filas:
+        if fila['fecha_generacion'] != ultimas_por_producto.get(fila['producto_id']):
+            continue
+        categoria = categoria_por_producto[fila['producto_id']]
+        totales[categoria] = totales.get(categoria, 0.0) + fila['total']
+
+    etiquetas = dict(Categoria.choices)
+    filas_ordenadas = sorted(totales.items(), key=lambda par: par[1], reverse=True)
+    return [
+        {'valor': codigo, 'etiqueta': etiquetas.get(codigo, codigo), 'total_pronostico': total}
+        for codigo, total in filas_ordenadas
+    ]
+
+
+def _elegir_seleccion_grafico(categorias, productos, seleccion):
+    """Qué mostrar en el gráfico de predicción: lo pedido explícitamente
+    por query string si es válido; si no, la categoría con más demanda
+    pronosticada (el pronóstico se calcula por categoría — un producto
+    suelto rara vez tiene historial entrenable, ver Categoria); si no hay
+    ninguna categoría con predicción, el primer producto con una.
+    Devuelve una tupla (tipo, valor) con tipo 'categoria'/'producto', o
+    (None, None) si no hay nada que graficar."""
+    if seleccion:
+        tipo, _, valor = seleccion.partition(':')
+        if tipo == 'categoria' and any(c['valor'] == valor for c in categorias):
+            return 'categoria', valor
+        if tipo == 'producto':
+            coincidencia = next((p for p in productos if str(p.pk) == valor), None)
+            if coincidencia:
+                return 'producto', coincidencia
+    if categorias:
+        return 'categoria', categorias[0]['valor']
+    if productos:
+        return 'producto', productos[0]
+    return None, None
+
+
+def grafico_prediccion_demanda(origen, tipo, valor):
     """Serie diaria de demanda real (PedidoDetalle.cantidad_solicitada, la
     misma fuente que usa el motor de predicción) más el pronóstico del
-    último lote de Prediccion del producto, para el gráfico de predicción
-    de demanda del dashboard. Real y pronóstico nunca se mezclan en el
-    mismo punto: se separan por 'fecha_corte' (el día justo antes de que
-    empiece el pronóstico), que la plantilla dibuja como una línea vertical
-    entre el histórico (línea continua) y el pronóstico (punteada)."""
-    if producto is None:
+    último lote de Prediccion, para el gráfico de predicción de demanda
+    del dashboard — de una categoría completa (sumando todos sus
+    productos) o de un producto suelto, según "tipo".
+
+    El histórico y el pronóstico NUNCA se recortan al rango de fechas del
+    dashboard (el filtro Hoy/7 días/30 días/Personalizado, u otro): son dos
+    cosas distintas. El pronóstico siempre se agrega completo, aunque sus
+    fechas caigan más allá de "hoy" — ese tramo futuro es justamente lo que
+    hay que ver. Real y pronóstico nunca se mezclan en el mismo punto: se
+    separan por 'fecha_corte' (el día justo antes de que empiece el
+    pronóstico), que la plantilla dibuja pasando de línea continua a
+    punteada."""
+    if tipo is None:
         return None
 
-    ultima_generacion = (
-        Prediccion.objects.filter(producto=producto)
-        .order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
-    )
-    pronostico = []
-    if ultima_generacion is not None:
-        pronostico = list(
-            Prediccion.objects.filter(producto=producto, fecha_generacion=ultima_generacion)
-            .order_by('fecha_objetivo').values('fecha_objetivo', 'demanda_predicha')
-        )
-    primera_fecha_pronostico = pronostico[0]['fecha_objetivo'] if pronostico else None
+    if tipo == 'producto':
+        producto = valor
+        productos_ids = [producto.pk]
+        etiqueta = f'{producto.codigo} — {producto.nombre} {producto.presentacion}'.strip()
+    else:
+        qs = Producto.objects.filter(categoria=valor, predicciones__isnull=False)
+        if origen:
+            qs = qs.filter(origen=origen)
+        productos_ids = list(qs.distinct().values_list('pk', flat=True))
+        etiqueta = dict(Categoria.choices).get(valor, valor)
+        if not productos_ids:
+            return None
 
-    # Ventana de histórico: 60 días de contexto antes de que empiece el
-    # pronóstico (o antes de hoy, si todavía no hay uno generado).
-    fin_historico = (primera_fecha_pronostico - timedelta(days=1)) if primera_fecha_pronostico else date.today()
-    inicio_historico = fin_historico - timedelta(days=59)
+    ultimas_por_producto = _ultima_prediccion_por_producto(productos_ids)
+    pronostico_por_fecha = {}
+    if ultimas_por_producto:
+        filas = Prediccion.objects.filter(producto_id__in=productos_ids).values(
+            'producto_id', 'fecha_objetivo', 'fecha_generacion', 'demanda_predicha',
+        )
+        for fila in filas:
+            if fila['fecha_generacion'] != ultimas_por_producto.get(fila['producto_id']):
+                continue
+            clave = fila['fecha_objetivo']
+            pronostico_por_fecha[clave] = pronostico_por_fecha.get(clave, 0.0) + fila['demanda_predicha']
+    pronostico = sorted(pronostico_por_fecha.items())
+    primera_fecha_pronostico = pronostico[0][0] if pronostico else None
+
+    # Ventana de histórico: proporcional a lo que dure el pronóstico (el
+    # triple de días, entre 21 y 60), para que el tramo pronosticado se vea
+    # con un tamaño razonable en vez de quedar como una astilla apretada
+    # contra 60 días fijos de historia cuando el horizonte es de solo 7 días.
+    # Sin pronóstico todavía, se ancla a la última fecha real disponible (no
+    # a "hoy" del reloj del servidor: los datos de la tesis son de un
+    # periodo fijo, y "hoy" podría no tener nada que ver con él).
+    if primera_fecha_pronostico:
+        fin_historico = primera_fecha_pronostico - timedelta(days=1)
+        dias_pronostico = (pronostico[-1][0] - primera_fecha_pronostico).days + 1
+        dias_historico = max(21, min(60, dias_pronostico * 3))
+    else:
+        detalles_qs = PedidoDetalle.objects.filter(producto_id__in=productos_ids)
+        if origen:
+            detalles_qs = detalles_qs.filter(pedido__origen=origen)
+        ultima_fecha_real = detalles_qs.aggregate(m=Max('pedido__fecha_solicitud'))['m']
+        fin_historico = ultima_fecha_real.date() if ultima_fecha_real else date.today()
+        dias_historico = 30
+    inicio_historico = fin_historico - timedelta(days=dias_historico - 1)
 
     detalles_qs = PedidoDetalle.objects.filter(
-        producto=producto,
+        producto_id__in=productos_ids,
         pedido__fecha_solicitud__date__gte=inicio_historico,
         pedido__fecha_solicitud__date__lte=fin_historico,
     )
@@ -308,11 +270,12 @@ def grafico_prediccion_demanda(producto, origen):
     while dia <= fin_historico:
         puntos.append({'fecha': dia.isoformat(), 'real': reales_por_fecha.get(dia, 0.0), 'pronostico': None})
         dia += timedelta(days=1)
-    for fila in pronostico:
-        puntos.append({'fecha': fila['fecha_objetivo'].isoformat(), 'real': None, 'pronostico': fila['demanda_predicha']})
+    for fecha_objetivo, total in pronostico:
+        puntos.append({'fecha': fecha_objetivo.isoformat(), 'real': None, 'pronostico': total})
 
     return {
-        'producto': producto,
+        'tipo': tipo,
+        'etiqueta': etiqueta,
         'puntos_json': json.dumps(puntos),
         'hay_pronostico': bool(pronostico),
         'fecha_corte': fin_historico if pronostico else None,
@@ -321,32 +284,12 @@ def grafico_prediccion_demanda(producto, origen):
 
 @login_required
 def dashboard(request):
-    origen = _parsear_origen(request.GET.get('origen'))
-    hoy = date.today()
-
-    # Control segmentado del periodo (Hoy / 7 días / 30 días / Personalizado).
-    # "Personalizado" (o su ausencia) cae al comportamiento de siempre: todo
-    # lo que hay cargado, no una ventana arbitraria que podía dejar pedidos
-    # reales fuera y mostrar un NS incompleto.
-    rango = request.GET.get('rango')
-    fecha_min_disponible, fecha_max_disponible = rango_disponible(origen=origen)
-    if rango == 'hoy':
-        fecha_inicio = fecha_fin = hoy
-    elif rango == '7d':
-        fecha_fin, fecha_inicio = hoy, hoy - timedelta(days=6)
-    elif rango == '30d':
-        fecha_fin, fecha_inicio = hoy, hoy - timedelta(days=29)
-    else:
-        rango = 'personalizado'
-        fecha_fin = _parsear_fecha(request.GET.get('fecha_fin')) or fecha_max_disponible or hoy
-        fecha_inicio = _parsear_fecha(request.GET.get('fecha_inicio')) or fecha_min_disponible or fecha_fin
-    if fecha_inicio > fecha_fin:
-        fecha_inicio, fecha_fin = fecha_fin, fecha_inicio
+    origen = _origen_o_defecto(request)
+    fecha_inicio, fecha_fin, rango = resolver_rango_periodo(request, origen)
 
     ei = calcular_ei(fecha_inicio, fecha_fin, origen=origen)
     ns = calcular_ns(fecha_inicio, fecha_fin, origen=origen)
     coi = calcular_coi(fecha_inicio, fecha_fin, origen=origen)
-    evolucion = serie_mensual(fecha_inicio, fecha_fin, origen=origen)
 
     # Periodo anterior: misma duración, inmediatamente antes del rango
     # mostrado, para poder decir "subió/bajó X% contra el periodo anterior"
@@ -358,11 +301,6 @@ def dashboard(request):
     ns_anterior = calcular_ns(fecha_inicio_anterior, fecha_fin_anterior, origen=origen)
     coi_anterior = calcular_coi(fecha_inicio_anterior, fecha_fin_anterior, origen=origen)
 
-    # Solo tiene sentido advertir cuando no se filtró por un origen
-    # puntual: si ya se eligió "Prueba" o "Real", los números no están
-    # mezclados sin importar qué más haya en la base de datos.
-    advertencia_mezcla = origen is None and hay_mezcla_de_origenes()
-
     # El dashboard es para verlo de un vistazo, no para scrollear un
     # listado completo: muestra solo los primeros casos (ya vienen
     # ordenados por urgencia/severidad) y enlaza a la pantalla con el
@@ -370,16 +308,16 @@ def dashboard(request):
     LIMITE_PREVIA = 8
     recomendaciones_todas = _recomendaciones_urgentes(origen)
     anomalias_todas = _anomalias_no_revisadas(origen)
-    top_productos = _top_productos_demanda(fecha_inicio, fecha_fin, origen)
 
     # Recomendación destacada del dashboard: la más urgente que todavía no
     # tiene una decisión tomada (aceptada is None). El resto sigue
     # disponible completo en /recomendaciones.
     recomendacion_destacada = next((r for r in recomendaciones_todas if r.aceptada is None), None)
 
+    categorias_prediccion = _categorias_con_prediccion(origen)
     productos_prediccion = _productos_con_prediccion(origen)
-    producto_grafico = _elegir_producto_grafico(
-        productos_prediccion, request.GET.get('producto_grafico'), top_productos,
+    tipo_grafico, valor_grafico = _elegir_seleccion_grafico(
+        categorias_prediccion, productos_prediccion, request.GET.get('serie_grafico'),
     )
 
     contexto = {
@@ -387,35 +325,25 @@ def dashboard(request):
         'fecha_fin': fecha_fin,
         'origen': origen or '',
         'rango_activo': rango,
-        'advertencia_mezcla': advertencia_mezcla,
         'ei': ei,
         'ns': ns,
         'coi': coi,
-        'ei_anterior': ei_anterior,
-        'ns_anterior': ns_anterior,
-        'coi_anterior': coi_anterior,
         'comparacion_ei': _variacion_periodo(ei['valor'], ei_anterior['valor'], mejor_si_sube=True),
         'comparacion_ns': _variacion_periodo(ns['valor'], ns_anterior['valor'], mejor_si_sube=True),
         'comparacion_coi': _variacion_periodo(coi['valor'], coi_anterior['valor'], mejor_si_sube=False),
-        # Con menos de tres meses en el rango, la línea de tiempo apenas
-        # tiene puntos que unir; el dashboard muestra en su lugar una
-        # comparación directa contra el periodo anterior (ver plantilla).
-        'meses_evolucion': len(evolucion),
-        'evolucion_json': json.dumps(evolucion),
         'recomendaciones': recomendaciones_todas[:LIMITE_PREVIA],
         'recomendaciones_total': len(recomendaciones_todas),
         'recomendacion_destacada': recomendacion_destacada,
-        'estado_modelo': _estado_modelo_activo(origen),
         'anomalias': anomalias_todas[:LIMITE_PREVIA],
         'anomalias_total': len(anomalias_todas),
-        'salud_catalogo': _salud_catalogo(origen),
         'anomalias_severidad': _anomalias_por_severidad(origen),
-        'distribucion_categorias': _distribucion_categorias(origen),
-        'top_productos': top_productos,
-        'motivos_no_atencion': _motivos_no_atencion(fecha_inicio, fecha_fin, origen),
+        'salud_catalogo': _salud_catalogo(origen),
+        'categorias_prediccion': categorias_prediccion,
         'productos_prediccion': productos_prediccion,
-        'producto_grafico': producto_grafico,
-        'grafico_prediccion': grafico_prediccion_demanda(producto_grafico, origen),
+        'tipo_grafico': tipo_grafico,
+        'categoria_grafico': valor_grafico if tipo_grafico == 'categoria' else None,
+        'producto_grafico_pk': valor_grafico.pk if tipo_grafico == 'producto' else None,
+        'grafico_prediccion': grafico_prediccion_demanda(origen, tipo_grafico, valor_grafico),
     }
     # El formulario de filtros pide esta misma URL por HTMX y solo necesita
     # la zona de resultados: la plantilla completa (con sidebar, etc.) sería
@@ -430,21 +358,22 @@ def dashboard(request):
 @login_required
 def dashboard_grafico_prediccion(request):
     """Solo la tarjeta del gráfico de predicción de demanda: el selector de
-    producto la vuelve a pedir por htmx sin recargar el resto del
-    dashboard (indicadores, tablas, etc.), que no dependen del producto
-    elegido aquí."""
-    origen = _parsear_origen(request.GET.get('origen'))
+    categoría/producto la vuelve a pedir por htmx sin recargar el resto del
+    dashboard (indicadores, tablas, etc.), que no dependen de la serie
+    elegida aquí."""
+    origen = _origen_o_defecto(request)
+    categorias_prediccion = _categorias_con_prediccion(origen)
     productos_prediccion = _productos_con_prediccion(origen)
-    top_productos = _top_productos_demanda(
-        date.today() - timedelta(days=29), date.today(), origen,
-    )
-    producto_grafico = _elegir_producto_grafico(
-        productos_prediccion, request.GET.get('producto_grafico'), top_productos,
+    tipo_grafico, valor_grafico = _elegir_seleccion_grafico(
+        categorias_prediccion, productos_prediccion, request.GET.get('serie_grafico'),
     )
     contexto = {
         'origen': origen or '',
+        'categorias_prediccion': categorias_prediccion,
         'productos_prediccion': productos_prediccion,
-        'producto_grafico': producto_grafico,
-        'grafico_prediccion': grafico_prediccion_demanda(producto_grafico, origen),
+        'tipo_grafico': tipo_grafico,
+        'categoria_grafico': valor_grafico if tipo_grafico == 'categoria' else None,
+        'producto_grafico_pk': valor_grafico.pk if tipo_grafico == 'producto' else None,
+        'grafico_prediccion': grafico_prediccion_demanda(origen, tipo_grafico, valor_grafico),
     }
     return render(request, 'inventario/_dashboard_grafico_prediccion.html', contexto)

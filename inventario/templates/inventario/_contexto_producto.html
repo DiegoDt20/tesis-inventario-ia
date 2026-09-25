@@ -1,0 +1,39 @@
+{% comment %}
+Contexto del producto elegido en el formulario de movimiento: lo que el
+operador necesita para decidir sin cambiar de pantalla. Vacío si el texto
+del buscador todavía no resuelve a un producto real.
+{% endcomment %}
+{% if producto %}
+    <div class="card contexto-producto mt-2">
+        <div class="card-body py-3">
+            <div class="contexto-producto-cifras">
+                <div>
+                    <span class="contexto-producto-etiqueta">Stock actual</span>
+                    <span class="contexto-producto-valor">{{ producto.stock_actual }}</span>
+                </div>
+                <div>
+                    <span class="contexto-producto-etiqueta">Stock mínimo</span>
+                    <span class="contexto-producto-valor">{{ producto.stock_minimo }}</span>
+                </div>
+                <div>
+                    <span class="contexto-producto-etiqueta">Categoría</span>
+                    <span class="contexto-producto-valor contexto-producto-valor-texto">{{ producto.get_categoria_display }}</span>
+                </div>
+            </div>
+            {% if ultimos_movimientos %}
+                <div class="contexto-producto-historial">
+                    <div class="contexto-producto-etiqueta mb-1">Últimos movimientos</div>
+                    {% for m in ultimos_movimientos %}
+                        <div class="contexto-producto-fila">
+                            <span>{{ m.fecha|date:'d/m/Y' }}</span>
+                            <span>{{ m.get_tipo_display }}</span>
+                            <span class="text-mono">{{ m.cantidad }} u.</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="contexto-producto-etiqueta mb-0 mt-2">Todavía no tiene movimientos registrados.</p>
+            {% endif %}
+        </div>
+    </div>
+{% endif %}

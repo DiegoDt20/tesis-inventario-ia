@@ -4,6 +4,7 @@ Lógica determinística: no hay modelos de ML involucrados en estas pruebas
 más allá de un ModeloEntrenado "de utilería" que exige la FK de Prediccion.
 """
 from datetime import timedelta
+from decimal import Decimal
 
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
@@ -107,3 +108,60 @@ class MotorRecomendacionesTests(TestCase):
         self.assertIn(f"{datos['cantidad_sugerida']:.0f}", datos['explicacion'])
         self.assertIn('95%', datos['explicacion'])
         self.assertIn('configurado en la ficha del producto', datos['explicacion'])
+
+    def test_guarda_demanda_de_categoria_y_participacion(self):
+        # Predicción por categoría repartida 25% / 75% entre dos productos.
+        producto = self._crear_producto('PIN-CAT1', stock_actual=0)
+        otro = self._crear_producto('PIN-CAT2', stock_actual=0)
+        Producto.objects.filter(pk__in=[producto.pk, otro.pk]).update(categoria='latex')
+        producto.refresh_from_db()
+        fecha_generacion = timezone.now()
+        hoy = timezone.localdate()
+        for i in range(1, 11):
+            for p, participacion in ((producto, 0.25), (otro, 0.75)):
+                Prediccion.objects.create(
+                    producto=p, fecha_generacion=fecha_generacion, fecha_objetivo=hoy + timedelta(days=i),
+                    demanda_predicha=8 * participacion, modelo=self.modelo,
+                    nivel_prediccion='categoria', participacion_usada=participacion,
+                )
+
+        datos = calcular_recomendacion(producto, nivel_servicio_objetivo=0.95, dias_cobertura=30)
+
+        self.assertEqual(datos['dias_horizonte'], 10)
+        self.assertAlmostEqual(datos['demanda_predicha_periodo'], 20.0)
+        self.assertAlmostEqual(datos['demanda_categoria_periodo'], 80.0)
+        self.assertEqual(datos['participacion_usada'], 0.25)
+        self.assertFalse(datos['lead_time_es_real'])
+        self.assertEqual(datos['pedidos_en_transito'], 0)
+
+    def test_prediccion_por_producto_no_tiene_datos_de_categoria(self):
+        producto = self._crear_producto('PIN-PROD', stock_actual=0)
+        self._crear_predicciones(producto, [3] * 30)
+        datos = calcular_recomendacion(producto, nivel_servicio_objetivo=0.95, dias_cobertura=30)
+        self.assertIsNone(datos['demanda_categoria_periodo'])
+        self.assertIsNone(datos['participacion_usada'])
+
+
+class RecomendacionCostoYCoberturaTests(TestCase):
+    def _recomendacion(self, cantidad, costo='30.00', demanda_periodo=60.0, dias=30):
+        producto = Producto.objects.create(
+            codigo=f'PIN-COSTO-{Producto.objects.count()}', nombre='Pintura',
+            precio_venta=Decimal('50.00'), costo_compra=Decimal(costo),
+        )
+        return Recomendacion(
+            producto=producto, cantidad_sugerida=cantidad, demanda_predicha_periodo=demanda_periodo,
+            dias_horizonte=dias,
+        )
+
+    def test_costo_y_cobertura(self):
+        r = self._recomendacion(19.5)  # redondeo comercial: 20 u.
+        self.assertEqual(r.unidades_sugeridas, 20)
+        self.assertEqual(r.costo_estimado, Decimal('600.00'))
+        self.assertEqual(r.dias_cobertura_compra, 10)  # 20 u. / 2 u. por día
+
+    def test_sin_costo_registrado(self):
+        self.assertIsNone(self._recomendacion(10, costo='0.00').costo_estimado)
+
+    def test_sin_demanda_no_calcula_cobertura(self):
+        self.assertIsNone(self._recomendacion(10, demanda_periodo=0.0).dias_cobertura_compra)
+        self.assertIsNone(self._recomendacion(10, dias=None).dias_cobertura_compra)

@@ -90,6 +90,12 @@ indicadores.
   importa las fichas de registro (Excel con hojas `1_EI`, `2_NS`, `3_COI_CA`,
   `3_COI_PD`) y calcula los tres indicadores desde la base de datos para
   verificar que la importación no deformó los datos.
+- Comando `cargar_precios --archivo precios.xlsx [--hoja nombre] [--dry-run]`
+  (`inventario/management/commands/cargar_precios.py`): actualiza
+  `precio_venta`, `costo_compra` y `stock_minimo` de productos existentes
+  (columnas código, precio de venta, costo de compra, stock mínimo). No crea
+  productos; reporta actualizados, códigos inexistentes y productos activos
+  que siguen sin precio (precio de venta o costo de compra en 0).
 
 ### Etapa 2 — motor de predicción de demanda con transferencia de aprendizaje (en curso)
 
@@ -146,13 +152,24 @@ Ya no están fuera de alcance: los tres están implementados y en uso.
 - **Motor de decisiones** (`inventario/decisiones/`) — determinístico, no
   IA: `calculos.py` (stock de seguridad, punto de reorden, cantidad a
   pedir) y `motor.py` (arma la `Recomendacion` con la explicación en texto
-  de `explicacion.py`). Comando `generar_recomendaciones`.
+  de `explicacion.py`). Comando `generar_recomendaciones`. Cada
+  `Recomendacion` guarda también los datos de entrada para auditar el
+  cálculo en pantalla (horizonte, demanda de la categoría, participación
+  aplicada, origen del lead time, pedidos en tránsito); el costo estimado
+  y los días de cobertura se calculan al mostrarla, con el costo de compra
+  actual del producto.
 - **Detección de anomalías** (`inventario/ml/anomalias.py`) — Isolation
   Forest + regla del 20% sobre diferencias de inventario
   (`ConteoDetalle`), y z-score sobre el histórico propio de cada producto
   para movimientos atípicos (mínimo `MIN_MOVIMIENTOS_ZSCORE = 5`
   movimientos previos). Guarda registros `Anomalia`. Comando
-  `detectar_anomalias`.
+  `detectar_anomalias`: vuelve a correrse sin duplicar (actualiza la
+  anomalía del mismo `ConteoDetalle`/`Movimiento` y conserva su revisión).
+  Severidad de diferencias de inventario según % sobre el stock de sistema,
+  configurable en `.env`: alta ≥ `ANOMALIA_UMBRAL_ALTA` (1.0; inclusivo
+  para que un faltante total, físico en 0, sea alta), media desde
+  `ANOMALIA_UMBRAL_MEDIA` (0.40), baja por debajo. Al revisar se registra
+  un motivo opcional (`Anomalia.MotivoRevision`).
 - **Asistente conversacional (RAG)** (`inventario/asistente/`) —
   `indexador.py` construye `DocumentoIndexado` (fichas de producto,
   recomendaciones vigentes, anomalías sin revisar, indicadores del

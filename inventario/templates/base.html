@@ -4,6 +4,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Sin defer, lo primero en <head>, a propósito: pone data-theme en
+         <html> ANTES de que el navegador pinte nada, para que la primera
+         pintura ya salga en el tema correcto (nunca un parpadeo claro→oscuro).
+         localStorage.tema manda si existe (el usuario ya eligió); si no,
+         se respeta la preferencia del sistema operativo. -->
+    <script>
+        (function () {
+            try {
+                const guardado = localStorage.getItem('tema');
+                const prefiereOscuro = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.setAttribute('data-theme', guardado || (prefiereOscuro ? 'dark' : 'light'));
+            } catch (error) {
+                // localStorage bloqueado (navegación privada estricta, etc.):
+                // se queda con el tema claro por defecto del CSS, nunca
+                // rompe la carga de la página por esto.
+            }
+        })();
+    </script>
     <title>{% block titulo %}Almacén Pinturas{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,7 +41,22 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     {% block estilos %}{% endblock %}
 </head>
-<body {% if user.is_authenticated %}x-data="{ sidebarColapsada: $persist(false).as('sidebarColapsada') }"{% endif %}>
+<body {% if user.is_authenticated %}x-data="{
+        sidebarColapsada: $persist(false).as('sidebarColapsada'),
+        temaActual: document.documentElement.getAttribute('data-theme') || 'light',
+        alternarTema() {
+            this.temaActual = this.temaActual === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', this.temaActual);
+            try { localStorage.setItem('tema', this.temaActual); } catch (error) { /* ver nota de arriba */ }
+            // Los <canvas> de Chart.js ya dibujados no se recolorean solos:
+            // cada gráfico se registra en window.__graficosDibujar al
+            // pintarse (ver _dashboard_resultados.html y
+            // _dashboard_grafico_prediccion.html) y aquí se vuelve a llamar
+            // a todos, para que lean de nuevo las variables CSS del tema
+            // recién puesto.
+            Object.values(window.__graficosDibujar || {}).forEach((dibujar) => dibujar());
+        },
+    }"{% endif %}>
     {% if user.is_authenticated %}
         <!-- Barra fija en escritorio (>= lg); en pantallas chicas se usa el offcanvas de más abajo.
              El estado de colapso vive en <body> para que el botón (dentro del include) y el
@@ -61,6 +94,11 @@
                         <p class="buscador-vacio">Escribe al menos 2 letras para buscar.</p>
                     </div>
                 </div>
+                <button type="button" class="topbar-boton-tema ms-auto" @click="alternarTema()"
+                        :title="temaActual === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'"
+                        aria-label="Cambiar entre tema claro y oscuro">
+                    <i class="bi" :class="temaActual === 'dark' ? 'bi-sun' : 'bi-moon-stars'"></i>
+                </button>
             </header>
         {% endif %}
 

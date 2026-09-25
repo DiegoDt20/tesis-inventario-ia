@@ -27,7 +27,11 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
-
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://localhost,http://127.0.0.1',
+    cast=Csv()
+)
 
 # Application definition
 
@@ -152,3 +156,13 @@ LLM_URL = config('LLM_URL', default='http://localhost:11434')
 # anonimizador la redacta antes de enviar cualquier dato a la API del
 # modelo de lenguaje (inventario/asistente/anonimizador.py). Opcional.
 EMPRESA_RAZON_SOCIAL = config('EMPRESA_RAZON_SOCIAL', default='')
+
+# Detección de anomalías
+# ----------------------
+# Umbrales de severidad de una diferencia de inventario, como fracción de
+# la diferencia sobre el stock de sistema (1.0 = 100%): alta desde
+# ANOMALIA_UMBRAL_ALTA (inclusive: un faltante total, físico en 0, es
+# exactamente 100%), media desde ANOMALIA_UMBRAL_MEDIA, baja por debajo. Tras cambiarlos, correr
+# "detectar_anomalias" recalcula la severidad de las anomalías existentes.
+ANOMALIA_UMBRAL_ALTA = config('ANOMALIA_UMBRAL_ALTA', default=1.0, cast=float)
+ANOMALIA_UMBRAL_MEDIA = config('ANOMALIA_UMBRAL_MEDIA', default=0.40, cast=float)

@@ -208,6 +208,10 @@ class Movimiento(models.Model):
     # fija el stock directamente, así que no hay una cantidad que restar/sumar
     # al deshacerlo, se necesita el valor que tenía el producto justo antes.
     stock_anterior = models.IntegerField(null=True, blank=True, editable=False)
+    # Stock que quedó después de este movimiento, para mostrarlo en el
+    # listado sin tener que reconstruir el historial completo del producto.
+    # Null en movimientos guardados antes de que este campo existiera.
+    stock_resultante = models.IntegerField(null=True, blank=True, editable=False)
     origen = models.CharField(max_length=10, choices=Origen.choices, default=Origen.PRUEBA, db_index=True)
 
     class Meta:
@@ -291,6 +295,7 @@ class Movimiento(models.Model):
                     )
                 })
 
+            self.stock_resultante = nuevo_stock
             producto.stock_actual = nuevo_stock
             super().save(*args, **kwargs)
             producto.save(update_fields=['stock_actual'])

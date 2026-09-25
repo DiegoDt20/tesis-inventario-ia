@@ -1,53 +1,173 @@
 {% load inventario_extras %}
-{% if pagina.object_list %}
-    <div class="card">
-        <div class="table-responsive">
-            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
-                <thead>
-                    <tr>
-                        <th>Producto</th>
-                        <th>Tipo</th>
-                        <th>Severidad</th>
-                        <th>Descripción</th>
-                        <th>Detectada</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for a in pagina %}
-                        <tr id="anomalia-{{ a.pk }}" class="tarjeta-htmx">
-                            <td>{{ a.producto.codigo }} — {{ a.producto.nombre }}</td>
-                            <td>{{ a.get_tipo_display }}</td>
-                            <td>
-                                <span class="badge-suave badge-suave-{{ a.severidad|color_estado }}">
-                                    <i class="bi {{ a.severidad|icono_estado }}"></i> {{ a.get_severidad_display }}
-                                </span>
-                            </td>
-                            <td>{{ a.descripcion }}</td>
-                            <td>{{ a.fecha_deteccion|date:'d/m/Y H:i' }}</td>
-                            <td>
-                                <button type="button" class="btn btn-outline-primary btn-sm"
-                                        hx-post="{% url 'inventario:anomalia_marcar_revisada' a.pk %}"
-                                        hx-target="#anomalia-{{ a.pk }}" hx-swap="outerHTML swap:300ms"
-                                        hx-indicator="#indicador-revisar-{{ a.pk }}">
-                                    <i class="bi bi-check2 me-1 icono-htmx"></i>
-                                    <span class="spinner-border spinner-htmx" id="indicador-revisar-{{ a.pk }}" aria-hidden="true"></span>
-                                    Marcar revisada
-                                </button>
-                            </td>
-                        </tr>
+{% if motivos_registrados %}
+    <p class="small text-muted mb-2">
+        <i class="bi bi-clipboard-data me-1"></i>Motivos registrados al revisar:
+        {% for m in motivos_registrados %}
+            <strong>{{ m.etiqueta }}</strong> {{ m.total }}{% if not forloop.last %} · {% endif %}
+        {% endfor %}
+    </p>
+{% endif %}
+
+{% if grupos %}
+    <form id="form-revision-masiva"
+          hx-post="{% url 'inventario:anomalias_marcar_revisadas' %}"
+          hx-target="#zona-resultados-anomalias" hx-swap="innerHTML swap:150ms"
+          hx-include="#filtros-anomalias" hx-indicator="#indicador-revision-masiva">
+        <input type="hidden" name="page" value="{{ pagina.number }}">
+        <input type="hidden" name="orden" value="{{ filtros.orden }}">
+
+        {% if filtros.estado != 'revisadas' %}
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <span id="contador-seleccion" class="small text-muted">0 seleccionadas</span>
+                <select name="motivo" class="form-select form-select-sm w-auto" aria-label="Motivo de la revisión">
+                    <option value="">Sin motivo</option>
+                    {% for valor, etiqueta in motivos %}
+                        <option value="{{ valor }}">{{ etiqueta }}</option>
                     {% endfor %}
-                </tbody>
-            </table>
+                </select>
+                <input type="text" name="detalle" maxlength="200" class="form-control form-control-sm w-auto"
+                       placeholder="Detalle (opcional)" aria-label="Detalle de la revisión">
+                <button type="submit" id="boton-revisar-seleccion" class="btn btn-primary btn-sm" disabled>
+                    <i class="bi bi-check2-all me-1 icono-htmx"></i>
+                    <span class="spinner-border spinner-htmx" id="indicador-revision-masiva" aria-hidden="true"></span>
+                    Marcar como revisadas
+                </button>
+                <span class="small text-muted ms-auto">{{ total_filtradas }} anomalía{{ total_filtradas|pluralize }}</span>
+            </div>
+        {% else %}
+            <p class="small text-muted mb-2">{{ total_filtradas }} anomalía{{ total_filtradas|pluralize }} revisada{{ total_filtradas|pluralize }}.</p>
+        {% endif %}
+
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0 tabla-compacta tabla-anomalias">
+                    <thead>
+                        <tr>
+                            <th class="columna-check"></th>
+                            <th>Producto</th>
+                            <th>Tipo</th>
+                            <th>Severidad</th>
+                            <th>Descripción</th>
+                            <th class="text-end">
+                                <a href="?{{ querystring_orden_diferencia }}" class="enlace-orden"
+                                   hx-get="?{{ querystring_orden_diferencia }}" hx-target="#zona-resultados-anomalias"
+                                   hx-swap="innerHTML swap:150ms" hx-push-url="true" hx-include="this"
+                                   title="Ordenar por diferencia">
+                                    Diferencia
+                                    {% if filtros.orden == 'diferencia' %}<i class="bi bi-sort-numeric-down"></i>
+                                    {% elif filtros.orden == '-diferencia' %}<i class="bi bi-sort-numeric-up-alt"></i>
+                                    {% else %}<i class="bi bi-arrow-down-up text-muted"></i>{% endif %}
+                                </a>
+                            </th>
+                            <th>Detectada</th>
+                            <th class="text-end">{% if filtros.estado == 'revisadas' %}Motivo{% endif %}</th>
+                        </tr>
+                    </thead>
+                    {% for grupo in grupos %}
+                        <tbody>
+                            <tr class="fila-grupo">
+                                <td class="columna-check">
+                                    {% if filtros.estado != 'revisadas' %}
+                                        <input type="checkbox" class="form-check-input check-grupo" data-grupo="{{ grupo.clave|default:'movimientos' }}"
+                                               aria-label="Seleccionar todas las de este grupo en la página">
+                                    {% endif %}
+                                </td>
+                                <td colspan="7">
+                                    {% if grupo.conteo %}
+                                        <i class="bi bi-clipboard-check me-1"></i>
+                                        <strong>Conteo físico del {{ grupo.conteo.fecha_corte|date:'d/m/Y' }}</strong>
+                                        {% if grupo.conteo.responsable %}<span class="text-muted">· {{ grupo.conteo.responsable }}</span>{% endif %}
+                                    {% else %}
+                                        <i class="bi bi-activity me-1"></i><strong>Movimientos atípicos</strong>
+                                    {% endif %}
+                                    <span class="ms-2">{{ grupo.total }} anomalía{{ grupo.total|pluralize }}</span>
+                                    <span class="ms-2 small">
+                                        {% if grupo.altas %}<span class="badge-suave badge-suave-danger">{{ grupo.altas }} alta{{ grupo.altas|pluralize }}</span>{% endif %}
+                                        {% if grupo.medias %}<span class="badge-suave badge-suave-warning">{{ grupo.medias }} media{{ grupo.medias|pluralize }}</span>{% endif %}
+                                        {% if grupo.bajas %}<span class="badge-suave badge-suave-secondary">{{ grupo.bajas }} baja{{ grupo.bajas|pluralize }}</span>{% endif %}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% for a in grupo.anomalias %}
+                                <tr id="anomalia-{{ a.pk }}" class="tarjeta-htmx">
+                                    <td class="columna-check">
+                                        {% if not a.revisada %}
+                                            <input type="checkbox" name="ids" value="{{ a.pk }}" class="form-check-input check-anomalia"
+                                                   data-grupo="{{ grupo.clave|default:'movimientos' }}"
+                                                   aria-label="Seleccionar {{ a.producto.codigo }}">
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-nowrap">{{ a.producto.codigo }} — {{ a.producto.nombre }}</td>
+                                    <td class="text-nowrap">{{ a.get_tipo_display }}</td>
+                                    <td>
+                                        <span class="badge-suave badge-suave-{{ a.severidad|color_estado }}">
+                                            <i class="bi {{ a.severidad|icono_estado }}"></i> {{ a.get_severidad_display }}
+                                        </span>
+                                    </td>
+                                    <td class="text-nowrap">{{ a.descripcion }}</td>
+                                    <td class="text-end text-nowrap">
+                                        {% with d=a.conteo_detalle.diferencia %}
+                                            {% if a.conteo_detalle_id %}
+                                                <span class="{% if d > 0 %}diferencia-sobra{% elif d < 0 %}diferencia-falta{% endif %}"
+                                                      title="{% if d > 0 %}Sobran{% else %}Faltan{% endif %} unidades frente al sistema">{{ d|stringformat:'+d' }}</span>
+                                            {% else %}
+                                                <span class="text-muted">—</span>
+                                            {% endif %}
+                                        {% endwith %}
+                                    </td>
+                                    <td class="text-nowrap">{{ a.fecha_deteccion|date:'d/m/Y' }}</td>
+                                    <td class="text-end text-nowrap">
+                                        {% if a.revisada %}
+                                            <span class="small" title="{{ a.detalle_revision }}">
+                                                <i class="bi bi-check2 text-success"></i>
+                                                {{ a.get_motivo_revision_display|default:'Sin motivo' }}{% if a.detalle_revision %}: {{ a.detalle_revision|truncatechars:40 }}{% endif %}
+                                            </span>
+                                        {% else %}
+                                            <div class="btn-group btn-group-sm">
+                                                <button type="button" class="btn btn-outline-primary"
+                                                        hx-post="{% url 'inventario:anomalia_marcar_revisada' a.pk %}"
+                                                        hx-vals='{"motivo": "", "detalle": ""}'>
+                                                    <i class="bi bi-check2 me-1"></i>Revisada
+                                                </button>
+                                                <button type="button" class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                                                        data-bs-toggle="dropdown" data-bs-popper-config='{"strategy": "fixed"}'
+                                                        aria-expanded="false" aria-label="Marcar revisada con motivo">
+                                                </button>
+                                                <ul class="dropdown-menu dropdown-menu-end">
+                                                    <li><h6 class="dropdown-header">Revisada, con motivo</h6></li>
+                                                    {% for valor, etiqueta in motivos %}
+                                                        <li>
+                                                            <button type="button" class="dropdown-item"
+                                                                    hx-post="{% url 'inventario:anomalia_marcar_revisada' a.pk %}"
+                                                                    hx-vals='{"motivo": "{{ valor }}", "detalle": ""}'
+                                                                    {% if valor == 'otro' %}hx-prompt="Describe brevemente el motivo (opcional)"{% endif %}>
+                                                                {{ etiqueta }}
+                                                            </button>
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    {% endfor %}
+                </table>
+            </div>
         </div>
-    </div>
+    </form>
     {% include 'inventario/_paginacion.html' with hx_target='#zona-resultados-anomalias' %}
 {% else %}
     <div class="card">
         <div class="estado-vacio">
             <i class="bi bi-check2-circle estado-vacio-icono"></i>
-            No hay anomalías sin revisar.<br>
-            Pide a un administrador que corra <code>detectar_anomalias</code> desde la línea de comandos.
+            {% if filtros.estado == 'pendientes' and not filtros.severidad and not filtros.tipo %}
+                No hay anomalías sin revisar.<br>
+                Pide a un administrador que corra <code>detectar_anomalias</code> desde la línea de comandos.
+            {% else %}
+                Ninguna anomalía coincide con los filtros.
+            {% endif %}
         </div>
     </div>
 {% endif %}

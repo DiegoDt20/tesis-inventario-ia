@@ -4,12 +4,91 @@
 {% block titulo %}Anomalías{% endblock %}
 
 {% block contenido %}
-<h1 class="titulo-pantalla"><i class="bi bi-shield-exclamation me-2"></i>Anomalías sin revisar</h1>
+<h1 class="titulo-pantalla"><i class="bi bi-shield-exclamation me-2"></i>Anomalías</h1>
 <p class="titulo-pantalla-detalle">
-    Diferencias de inventario y movimientos atípicos detectados automáticamente, de mayor a menor severidad.
+    Diferencias de inventario y movimientos atípicos detectados automáticamente, agrupados por conteo físico.
+    Al revisarlas, indica el motivo del descuadre: es lo que permite corregir la causa.
 </p>
+
+<form id="filtros-anomalias" class="row g-2 align-items-end mb-3"
+      hx-get="{% url 'inventario:anomalias_lista' %}" hx-target="#zona-resultados-anomalias"
+      hx-trigger="change, submit" hx-swap="innerHTML swap:150ms" hx-push-url="true"
+      hx-indicator="#indicador-filtro-anomalias">
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="estado">Estado</label>
+        <select id="estado" name="estado" class="form-select form-select-sm">
+            {% for valor, etiqueta in estados %}
+                <option value="{{ valor }}" {% if filtros.estado == valor %}selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="severidad">Severidad</label>
+        <select id="severidad" name="severidad" class="form-select form-select-sm">
+            <option value="">Todas</option>
+            {% for valor, etiqueta in severidades %}
+                <option value="{{ valor }}" {% if filtros.severidad == valor %}selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="tipo">Tipo</label>
+        <select id="tipo" name="tipo" class="form-select form-select-sm">
+            <option value="">Todos</option>
+            {% for valor, etiqueta in tipos %}
+                <option value="{{ valor }}" {% if filtros.tipo == valor %}selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <span class="spinner-border spinner-border-sm spinner-htmx" id="indicador-filtro-anomalias" aria-hidden="true"></span>
+        {# Recarga normal (sin htmx): así los selects también vuelven a su valor por defecto. #}
+        <a href="{% url 'inventario:anomalias_lista' %}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-x-lg me-1"></i>Limpiar
+        </a>
+    </div>
+</form>
 
 <div id="zona-resultados-anomalias" class="zona-resultados">
     {% include 'inventario/_anomalias_lista_resultados.html' %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Selección múltiple para "Marcar como revisadas". Delegado en document
+    // porque htmx reemplaza la tabla completa en cada filtro o revisión.
+    (function () {
+        function actualizarSeleccion() {
+            const marcadas = document.querySelectorAll('.check-anomalia:checked').length;
+            const contador = document.getElementById('contador-seleccion');
+            const boton = document.getElementById('boton-revisar-seleccion');
+            if (contador) {
+                contador.textContent = marcadas === 1 ? '1 seleccionada' : marcadas + ' seleccionadas';
+            }
+            if (boton) {
+                boton.disabled = marcadas === 0;
+            }
+            document.querySelectorAll('.check-grupo').forEach(function (grupo) {
+                const filas = document.querySelectorAll('.check-anomalia[data-grupo="' + grupo.dataset.grupo + '"]');
+                const marcadasGrupo = Array.from(filas).filter(function (c) { return c.checked; }).length;
+                grupo.checked = filas.length > 0 && marcadasGrupo === filas.length;
+                grupo.indeterminate = marcadasGrupo > 0 && marcadasGrupo < filas.length;
+            });
+        }
+
+        document.addEventListener('change', function (evento) {
+            const objetivo = evento.target;
+            if (objetivo.classList.contains('check-grupo')) {
+                document.querySelectorAll('.check-anomalia[data-grupo="' + objetivo.dataset.grupo + '"]')
+                    .forEach(function (c) { c.checked = objetivo.checked; });
+            }
+            if (objetivo.classList.contains('check-grupo') || objetivo.classList.contains('check-anomalia')) {
+                actualizarSeleccion();
+            }
+        });
+        document.body.addEventListener('htmx:afterSwap', actualizarSeleccion);
+        actualizarSeleccion();
+    })();
+</script>
 {% endblock %}

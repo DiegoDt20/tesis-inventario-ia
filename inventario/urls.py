@@ -1,6 +1,8 @@
 from django.urls import path
 
-from .views import anomalias, asistente, busqueda, conteos, dashboard, movimientos, pedidos, recomendaciones
+from .views import (
+    anomalias, asistente, busqueda, conteos, dashboard, modelo, movimientos, pedidos, recomendaciones, reportes,
+)
 
 app_name = 'inventario'
 
@@ -20,9 +22,15 @@ urlpatterns = [
     ),
     path('pedidos/validar-linea/', pedidos.pedido_validar_linea, name='pedido_validar_linea'),
 
+    path('movimientos/', movimientos.movimiento_lista, name='movimiento_lista'),
     path('movimientos/nuevo/', movimientos.movimiento_nuevo, name='movimiento_nuevo'),
     path('movimientos/validar/', movimientos.movimiento_validar, name='movimiento_validar'),
+    path(
+        'movimientos/contexto-producto/',
+        movimientos.movimiento_contexto_producto, name='movimiento_contexto_producto',
+    ),
 
+    path('conteos/', conteos.conteo_lista, name='conteo_lista'),
     path('conteos/nuevo/', conteos.conteo_nuevo, name='conteo_nuevo'),
 
     path('recomendaciones/', recomendaciones.recomendaciones_lista, name='recomendaciones_lista'),
@@ -32,10 +40,15 @@ urlpatterns = [
     ),
 
     path('anomalias/', anomalias.anomalias_lista, name='anomalias_lista'),
+    path('anomalias/revisar/', anomalias.anomalias_marcar_revisadas, name='anomalias_marcar_revisadas'),
     path(
         'anomalias/<int:pk>/revisar/',
         anomalias.anomalia_marcar_revisada, name='anomalia_marcar_revisada',
     ),
+
+    path('modelo/', modelo.modelo_detalle, name='modelo_detalle'),
+
+    path('reportes/', reportes.reportes, name='reportes'),
 
     path('asistente/', asistente.asistente_chat, name='asistente_chat'),
     path('asistente/panel/', asistente.asistente_panel, name='asistente_panel'),

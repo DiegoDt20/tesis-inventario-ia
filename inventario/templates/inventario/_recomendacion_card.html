@@ -1,5 +1,5 @@
 {% load inventario_extras %}
-<div class="card mb-3 tarjeta-htmx" id="recomendacion-{{ r.pk }}" x-data="{ confirmandoRechazo: false }">
+<div class="card mb-3 tarjeta-htmx" id="recomendacion-{{ r.pk }}" x-data="{ confirmandoRechazo: false, porQue: false }">
     <div class="card-body">
         <h6 class="mb-2 d-flex align-items-center flex-wrap gap-2">
             {{ r.producto.codigo }} — {{ r.producto.nombre }}
@@ -12,20 +12,127 @@
                 <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Rechazada</span>
             {% endif %}
         </h6>
-        <p class="mb-3">{{ r.explicacion }}</p>
-        {% if r.aceptada is None %}
-            <button type="button" class="btn btn-acento btn-sm"
-                    hx-post="{% url 'inventario:recomendacion_decidir' r.pk %}" hx-vals='{"accion": "aceptar"}'
-                    hx-target="#recomendacion-{{ r.pk }}" hx-swap="outerHTML"
-                    hx-indicator="#indicador-aceptar-{{ r.pk }}">
-                <i class="bi bi-check-lg me-1 icono-htmx"></i>
-                <span class="spinner-border spinner-htmx" id="indicador-aceptar-{{ r.pk }}" aria-hidden="true"></span>
-                Aceptar
-            </button>
-            <button type="button" class="btn btn-outline-danger btn-sm" @click="confirmandoRechazo = true">
-                <i class="bi bi-x-lg me-1"></i>Rechazar
-            </button>
 
+        {# Lo esencial en una línea; el detalle del cálculo va en "¿Por qué?". #}
+        <p class="recomendacion-resumen mb-3">
+            Stock actual <strong>{{ r.stock_actual_snapshot }}</strong>
+            <span class="separador">·</span>
+            Stock de seguridad <strong>{{ r.stock_seguridad|floatformat:0 }}</strong>
+            <span class="separador">·</span>
+            {% if r.unidades_sugeridas %}
+                Pedir <strong>{{ r.unidades_sugeridas }} u.</strong>
+                <span class="separador">·</span>
+                {% if r.costo_estimado is not None %}
+                    Costo estimado <strong>S/ {{ r.costo_estimado|floatformat:'2g' }}</strong>
+                {% else %}
+                    <span class="text-muted" title="El producto no tiene costo de compra registrado (cargar_precios).">Costo: sin costo registrado</span>
+                {% endif %}
+                {% if r.dias_cobertura_compra is not None %}
+                    <span class="separador">·</span>
+                    Cubre <strong>{{ r.dias_cobertura_compra|floatformat:0 }} días</strong>
+                {% endif %}
+            {% else %}
+                <span class="text-muted">No se sugiere pedir</span>
+            {% endif %}
+        </p>
+
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            {% if r.aceptada is None %}
+                <button type="button" class="btn btn-acento btn-sm"
+                        hx-post="{% url 'inventario:recomendacion_decidir' r.pk %}" hx-vals='{"accion": "aceptar"}'
+                        hx-target="#recomendacion-{{ r.pk }}" hx-swap="outerHTML"
+                        hx-indicator="#indicador-aceptar-{{ r.pk }}">
+                    <i class="bi bi-check-lg me-1 icono-htmx"></i>
+                    <span class="spinner-border spinner-htmx" id="indicador-aceptar-{{ r.pk }}" aria-hidden="true"></span>
+                    Aceptar
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm" @click="confirmandoRechazo = true">
+                    <i class="bi bi-x-lg me-1"></i>Rechazar
+                </button>
+            {% endif %}
+            <button type="button" class="btn btn-outline-secondary btn-sm" @click="porQue = !porQue"
+                    :aria-expanded="porQue" aria-controls="por-que-{{ r.pk }}">
+                <i class="bi bi-question-circle me-1"></i>¿Por qué?
+            </button>
+        </div>
+
+        <div class="recomendacion-destacada-explicacion" id="por-que-{{ r.pk }}" x-show="porQue" x-cloak x-transition.duration.150ms>
+            {% if r.dias_horizonte %}
+                <dl class="row mb-0 small lista-por-que">
+                    <dt class="col-sm-4">Estado</dt>
+                    <dd class="col-sm-8">
+                        {% if r.estado == 'critico' %}
+                            El stock actual ({{ r.stock_actual_snapshot }}) está en o por debajo del stock de seguridad ({{ r.stock_seguridad|floatformat:1 }}).
+                        {% elif r.estado == 'reponer' %}
+                            El stock actual ({{ r.stock_actual_snapshot }}) está por debajo del punto de reorden ({{ r.punto_reorden|floatformat:1 }}).
+                        {% elif r.estado == 'exceso' %}
+                            El stock actual ({{ r.stock_actual_snapshot }}) supera varias veces el punto de reorden ({{ r.punto_reorden|floatformat:1 }}): sobrestock.
+                        {% else %}
+                            El stock actual ({{ r.stock_actual_snapshot }}) está por encima del punto de reorden ({{ r.punto_reorden|floatformat:1 }}).
+                        {% endif %}
+                    </dd>
+
+                    {% if r.demanda_categoria_periodo is not None %}
+                        <dt class="col-sm-4">Demanda de la categoría</dt>
+                        <dd class="col-sm-8">
+                            {{ r.demanda_categoria_periodo|floatformat:1 }} u. pronosticadas para {{ r.producto.get_categoria_display }}
+                            en {{ r.dias_horizonte }} días
+                        </dd>
+                        <dt class="col-sm-4">Participación aplicada</dt>
+                        <dd class="col-sm-8">
+                            {{ r.participacion_pct|floatformat:2 }}% (participación histórica del producto en su categoría)
+                            → {{ r.demanda_predicha_periodo|floatformat:1 }} u. para este producto
+                        </dd>
+                    {% else %}
+                        <dt class="col-sm-4">Demanda pronosticada</dt>
+                        <dd class="col-sm-8">{{ r.demanda_predicha_periodo|floatformat:1 }} u. en {{ r.dias_horizonte }} días (predicción por producto)</dd>
+                    {% endif %}
+
+                    <dt class="col-sm-4">Demanda diaria</dt>
+                    <dd class="col-sm-8">{{ r.demanda_diaria|floatformat:2 }} u./día</dd>
+
+                    <dt class="col-sm-4">Lead time</dt>
+                    <dd class="col-sm-8">
+                        {{ r.lead_time_usado|floatformat:1 }} días
+                        ({% if r.lead_time_es_real %}promedio real de compras recibidas{% else %}de la ficha del producto{% endif %})
+                    </dd>
+
+                    <dt class="col-sm-4">Stock de seguridad</dt>
+                    <dd class="col-sm-8">
+                        z × σ × √lead time = {{ r.stock_seguridad|floatformat:1 }}
+                        (σ = {{ r.desviacion_demanda|floatformat:2 }} u./día, nivel de servicio {% widthratio r.nivel_servicio_objetivo 1 100 %}%)
+                    </dd>
+
+                    <dt class="col-sm-4">Punto de reorden</dt>
+                    <dd class="col-sm-8">demanda diaria × lead time + SS = {{ r.punto_reorden|floatformat:1 }}</dd>
+
+                    <dt class="col-sm-4">Cantidad sugerida</dt>
+                    <dd class="col-sm-8">
+                        demanda del periodo + SS − stock − en tránsito =
+                        {{ r.demanda_predicha_periodo|floatformat:1 }} + {{ r.stock_seguridad|floatformat:1 }}
+                        − {{ r.stock_actual_snapshot }} − {{ r.pedidos_en_transito|default:0 }}
+                        = {{ r.cantidad_sugerida|floatformat:1 }} → {{ r.unidades_sugeridas }} u.{% if r.cantidad_sugerida <= 0 %} (sin pedido){% endif %}
+                    </dd>
+
+                    {% if r.unidades_sugeridas %}
+                        <dt class="col-sm-4">Costo estimado</dt>
+                        <dd class="col-sm-8">
+                            {% if r.costo_estimado is not None %}
+                                {{ r.unidades_sugeridas }} u. × S/ {{ r.producto.costo_compra|floatformat:2 }} (costo de compra actual)
+                                = S/ {{ r.costo_estimado|floatformat:'2g' }}
+                            {% else %}
+                                Sin costo de compra registrado para el producto.
+                            {% endif %}
+                        </dd>
+                    {% endif %}
+                </dl>
+            {% else %}
+                {# Recomendaciones generadas antes de guardar los datos del cálculo. #}
+                {{ r.explicacion }}
+            {% endif %}
+        </div>
+
+        {% if r.aceptada is None %}
             <div class="fondo-modal-confirmacion" x-show="confirmandoRechazo" x-cloak
                  @keydown.escape.window="confirmandoRechazo = false">
                 <div class="modal-confirmacion" @click.outside="confirmandoRechazo = false">
