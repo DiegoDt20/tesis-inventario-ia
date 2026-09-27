@@ -18,6 +18,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ..asistente.proveedores import ErrorProveedorLLM
+from ._dobles import _proveedor_simulado
 from ..forms import etiqueta_producto
 from ..models import (
     Anomalia,
@@ -300,7 +301,7 @@ class AsistenteStreamTests(TestCase):
 
     def test_respuesta_exitosa_transmite_fragmentos_y_evento_final(self):
         with patch('inventario.asistente.asistente.recuperar_documentos', return_value=[self.documento]), \
-                patch('inventario.asistente.asistente.obtener_proveedor') as mock_obtener:
+                patch('inventario.asistente.asistente.obtener_proveedor', return_value=_proveedor_simulado()) as mock_obtener:
             mock_obtener.return_value.generar_respuesta_stream.return_value = iter(['El EI ', 'es 92%.'])
 
             respuesta = self.client.get(reverse('inventario:asistente_stream'), {'pregunta': '¿Cómo va el EI?'})
@@ -318,7 +319,7 @@ class AsistenteStreamTests(TestCase):
 
     def test_falla_del_proveedor_antes_del_primer_fragmento_no_rompe_el_stream(self):
         with patch('inventario.asistente.asistente.recuperar_documentos', return_value=[self.documento]), \
-                patch('inventario.asistente.asistente.obtener_proveedor') as mock_obtener:
+                patch('inventario.asistente.asistente.obtener_proveedor', return_value=_proveedor_simulado()) as mock_obtener:
             mock_obtener.return_value.generar_respuesta_stream.side_effect = ErrorProveedorLLM('sin conexión')
 
             respuesta = self.client.get(reverse('inventario:asistente_stream'), {'pregunta': '¿Cómo va el EI?'})
@@ -334,7 +335,7 @@ class AsistenteStreamTests(TestCase):
             raise ErrorProveedorLLM('se perdió la conexión')
 
         with patch('inventario.asistente.asistente.recuperar_documentos', return_value=[self.documento]), \
-                patch('inventario.asistente.asistente.obtener_proveedor') as mock_obtener:
+                patch('inventario.asistente.asistente.obtener_proveedor', return_value=_proveedor_simulado()) as mock_obtener:
             mock_obtener.return_value.generar_respuesta_stream.side_effect = generador_con_falla
 
             respuesta = self.client.get(reverse('inventario:asistente_stream'), {'pregunta': '¿Cómo va el EI?'})
@@ -347,7 +348,7 @@ class AsistenteStreamTests(TestCase):
         self.assertIn('a mitad de la respuesta', cuerpo)
 
     def test_pregunta_vacia_termina_de_inmediato_sin_consultar_al_proveedor(self):
-        with patch('inventario.asistente.asistente.obtener_proveedor') as mock_obtener:
+        with patch('inventario.asistente.asistente.obtener_proveedor', return_value=_proveedor_simulado()) as mock_obtener:
             respuesta = self.client.get(reverse('inventario:asistente_stream'), {'pregunta': '  '})
             cuerpo = self._consumir(respuesta)
 

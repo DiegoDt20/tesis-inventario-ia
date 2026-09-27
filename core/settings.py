@@ -143,14 +143,21 @@ LOGOUT_REDIRECT_URL = 'login'
 
 # Asistente conversacional (RAG)
 # ------------------------------
-# Proveedor del modelo de lenguaje: por ahora Ollama local (los datos de la
-# microempresa nunca salen del equipo), con una interfaz común
-# (inventario/asistente/proveedores.py) para poder pasar a una API externa
-# más adelante cambiando solo estas variables, sin tocar el resto del
-# módulo.
+# Proveedor del modelo de lenguaje, con una interfaz común
+# (inventario/asistente/proveedores.py): "ollama" (local, los datos no
+# salen del equipo) o "anthropic" (Claude vía API externa; la anonimización
+# se vuelve a aplicar justo antes de enviar). LLM_MODELO es el modelo del
+# proveedor elegido (p. ej. qwen2.5:7b para Ollama, claude-haiku-4-5 para
+# Anthropic). LLM_URL solo aplica a Ollama; ANTHROPIC_API_KEY solo a
+# Anthropic, y va únicamente en el .env, nunca en el código.
 LLM_PROVEEDOR = config('LLM_PROVEEDOR', default='ollama')
 LLM_MODELO = config('LLM_MODELO', default='qwen2.5:7b')
 LLM_URL = config('LLM_URL', default='http://localhost:11434')
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
+# Origen de los datos que el asistente indexa y con los que responde
+# ("real" o "prueba"). "real" por defecto, igual que el dashboard: los
+# datos de prueba eran solo para desarrollo y no deben mezclarse.
+ASISTENTE_ORIGEN = config('ASISTENTE_ORIGEN', default='real')
 
 # Razón social de la microempresa: si aparece en algún documento del RAG, el
 # anonimizador la redacta antes de enviar cualquier dato a la API del
@@ -166,3 +173,21 @@ EMPRESA_RAZON_SOCIAL = config('EMPRESA_RAZON_SOCIAL', default='')
 # "detectar_anomalias" recalcula la severidad de las anomalías existentes.
 ANOMALIA_UMBRAL_ALTA = config('ANOMALIA_UMBRAL_ALTA', default=1.0, cast=float)
 ANOMALIA_UMBRAL_MEDIA = config('ANOMALIA_UMBRAL_MEDIA', default=0.40, cast=float)
+
+# Registro (logging)
+# ------------------
+# Los módulos de inventario escriben en consola desde WARNING (p. ej. las
+# fallas del proveedor de LLM, con el código HTTP de la API de Anthropic).
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {'format': '{asctime} {levelname} {name}: {message}', 'style': '{'},
+    },
+    'handlers': {
+        'consola': {'class': 'logging.StreamHandler', 'formatter': 'simple'},
+    },
+    'loggers': {
+        'inventario': {'handlers': ['consola'], 'level': 'WARNING', 'propagate': False},
+    },
+}

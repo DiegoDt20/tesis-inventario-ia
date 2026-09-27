@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from django.db.models import F, Max, Min, Sum
 
-from ..models import ConteoDetalle, ConteoFisico, CostoAlmacenamiento, Origen, Pedido, PedidoDetalle
+from ..models import ConteoDetalle, ConteoFisico, CostoAlmacenamiento, Pedido, PedidoDetalle
 
 
 def calcular_ei(fecha_inicio=None, fecha_fin=None, origen=None):
@@ -195,16 +195,3 @@ def rango_disponible(origen=None):
         return None, None
     return min(fechas_min), max(fechas_max)
 
-
-def hay_mezcla_de_origenes():
-    """True si hay datos de origen "prueba" Y de origen "real" al mismo
-    tiempo en alguna de las fuentes que alimentan los indicadores
-    (ConteoFisico para EI, Pedido para NS, CostoAlmacenamiento para COI).
-
-    Sirve para advertir que un cálculo sin filtrar por origen estaría
-    mezclando datos de prueba (pretest/postest) con datos reales, lo que no
-    tiene sentido para la investigación."""
-    modelos = (ConteoFisico, Pedido, CostoAlmacenamiento)
-    tiene_prueba = any(modelo.objects.filter(origen=Origen.PRUEBA).exists() for modelo in modelos)
-    tiene_real = any(modelo.objects.filter(origen=Origen.REAL).exists() for modelo in modelos)
-    return tiene_prueba and tiene_real

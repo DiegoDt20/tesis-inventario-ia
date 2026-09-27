@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
-from django.db.models import Case, Count, IntegerField, When
+from django.db.models import Case, Count, IntegerField, Max, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -45,8 +45,17 @@ def _resumen_lote(qs):
             criticas_sin_costo += 1
         else:
             costo_criticas += r.costo_estimado
+    conteos_metodo = dict(qs.values_list('metodo').annotate(total=Count('id')))
+    metodos = [
+        {'valor': valor, 'etiqueta': etiqueta, 'total': conteos_metodo.get(valor, 0)}
+        for valor, etiqueta in Recomendacion.Metodo.choices
+    ]
     return {
         'estados': estados,
+        'metodos': metodos,
+        # Todas las del lote parten del mismo histórico (el del origen de
+        # generar_recomendaciones); None en lotes anteriores a este campo.
+        'fecha_corte': qs.aggregate(m=Max('fecha_corte_historico'))['m'],
         'total_criticas': conteos.get(Recomendacion.Estado.CRITICO, 0),
         'costo_criticas': costo_criticas,
         'criticas_sin_costo': criticas_sin_costo,

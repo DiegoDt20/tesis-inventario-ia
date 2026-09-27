@@ -6,7 +6,8 @@
 {% block contenido %}
 <h1 class="titulo-pantalla"><i class="bi bi-lightbulb me-2"></i>Recomendaciones de reposición</h1>
 <p class="titulo-pantalla-detalle mb-2">
-    Cuánto comprar y cuándo, calculado por el motor de decisiones a partir de la demanda predicha.
+    Cuánto comprar y cuándo, calculado por el motor de decisiones a partir de la demanda predicha
+    o, para los productos sin pronóstico, solo con punto de reorden y stock mínimo.
 </p>
 
 {% if fecha_generacion %}
@@ -30,6 +31,12 @@
                     <strong>{{ e.total }}</strong> {{ e.etiqueta }}
                 </span>
             {% endfor %}
+            <span class="small text-muted">
+                {% for m in resumen.metodos %}{{ m.total }} por {{ m.etiqueta|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                {% if resumen.fecha_corte %}
+                    <br><i class="bi bi-calendar-check me-1"></i>Histórico hasta el {{ resumen.fecha_corte|date:'d/m/Y' }}: el pronóstico parte de esa fecha, no de hoy.
+                {% endif %}
+            </span>
             <div class="ms-md-auto text-md-end">
                 <div class="small text-muted">Costo si se aceptaran las {{ resumen.total_criticas }} críticas</div>
                 <div class="fs-5 fw-semibold">S/ {{ resumen.costo_criticas|floatformat:'2g' }}</div>

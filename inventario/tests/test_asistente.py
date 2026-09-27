@@ -3,22 +3,27 @@ documentos relevantes, que la anonimización elimine los datos sensibles
 antes de enviarlos a la API del modelo de lenguaje, que el prompt del
 sistema fije el idioma, y que una falla del proveedor de LLM no rompa la
 pantalla del chat."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.core.exceptions import ImproperlyConfigured
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from inventario.asistente import indexador, recuperador
 from inventario.asistente.anonimizador import anonimizar_texto
+from inventario.asistente.configuracion import origen_asistente
 from inventario.asistente.asistente import PROMPT_SISTEMA, consultar_asistente
 from inventario.asistente.proveedores import ErrorProveedorLLM
-from inventario.servicios.indicadores import calcular_ns, rango_disponible
+from inventario.tests._dobles import _proveedor_simulado
 from inventario.models import (
+    Anomalia,
     Categoria,
     ConsultaAsistente,
+    ConteoDetalle,
+    ConteoFisico,
     DocumentoIndexado,
     Pedido,
     PedidoDetalle,
@@ -233,6 +238,16 @@ class AnonimizacionTests(TestCase):
         self.assertIn('PIN-001', resultado)
         self.assertIn('10 unidades', resultado)
 
+    def test_redacta_el_nombre_aunque_se_escriba_con_otras_mayusculas(self):
+        # La pregunta la escribe el usuario: no tiene por qué copiar el
+        # nombre tal como quedó registrado.
+        Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime(2026, 8, 1)),
+            cliente='Constructora Los Andes S.A.C.', canal=Pedido.Canal.MOSTRADOR,
+        )
+        resultado = anonimizar_texto('¿qué compró constructora los andes s.a.c.?')
+        self.assertEqual(resultado, '¿qué compró [CLIENTE]?')
+
     def test_redacta_correo_y_telefono(self):
         texto = 'Contacto: ventas@empresa.com, teléfono 987654321.'
 
@@ -275,6 +290,10 @@ class ConsultarAsistenteAnonimizaContextoTests(TestCase):
         capturado = {}
 
         class ProveedorFalso:
+            nombre = 'ollama'
+            modelo = 'qwen2.5:7b'
+            modelo_respondio = None
+
             def generar_respuesta(self, mensajes):
                 capturado['mensajes'] = mensajes
                 return 'Respuesta de prueba.'
@@ -300,7 +319,7 @@ class FalloProveedorLLMTests(TestCase):
 
     def test_consultar_asistente_no_lanza_si_el_proveedor_falla(self):
         with patch('inventario.asistente.asistente.recuperar_documentos', return_value=[self.documento]), \
-                patch('inventario.asistente.asistente.obtener_proveedor') as mock_obtener:
+                patch('inventario.asistente.asistente.obtener_proveedor', return_value=_proveedor_simulado()) as mock_obtener:
             mock_obtener.return_value.generar_respuesta.side_effect = ErrorProveedorLLM('sin conexión')
 
             resultado = consultar_asistente('¿cuál es el nivel de servicio?')
@@ -310,7 +329,7 @@ class FalloProveedorLLMTests(TestCase):
 
     def test_pantalla_del_chat_no_se_rompe_si_el_proveedor_falla(self):
         with patch('inventario.asistente.asistente.recuperar_documentos', return_value=[self.documento]), \
-                patch('inventario.asistente.asistente.obtener_proveedor') as mock_obtener:
+                patch('inventario.asistente.asistente.obtener_proveedor', return_value=_proveedor_simulado()) as mock_obtener:
             mock_obtener.return_value.generar_respuesta.side_effect = ErrorProveedorLLM('sin conexión')
 
             respuesta = self.client.post(
@@ -338,6 +357,15 @@ class PromptSistemaIdiomaTests(TestCase):
     def test_prompt_sistema_mantiene_las_reglas_de_no_calcular(self):
         self.assertIn('CONTEXTO', PROMPT_SISTEMA)
         self.assertIn('no calcules', PROMPT_SISTEMA.lower())
+
+    def test_prompt_prohibe_calificar_sin_umbral_del_sistema(self):
+        # "EI 56% (bajo)" es una valoración del modelo, no del sistema: el
+        # prompt debe prohibirla salvo que el contexto traiga la
+        # calificación o el umbral.
+        prompt = PROMPT_SISTEMA.lower()
+        self.assertIn('sin calificarlas', prompt)
+        self.assertIn('"bajo"', prompt)
+        self.assertIn('umbral', prompt)
 
 
 class IndexadorDocumentosResumenTests(TestCase):
@@ -386,46 +414,123 @@ class IndexadorDocumentosResumenTests(TestCase):
     def test_resumen_estado_vacio_sin_lote_de_recomendaciones(self):
         self.assertEqual(indexador._documento_resumen_estado(), [])
 
-    def test_resumen_anomalias_dice_que_no_hay_si_esta_vacio(self):
-        documentos = indexador._documento_resumen_anomalias()
 
+class IndexadorDocumentoIndicadoresUsaElRangoDelDashboardTests(TestCase):
+    """El documento de indicadores debe calcular EI/NS/COI con el mismo
+    origen ("real" por defecto, ASISTENTE_ORIGEN) y el mismo rango que ve
+    el dueño en el dashboard sin filtros: el rango de los datos de ESE
+    origen. Antes no filtraba por origen y mezclaba datos de prueba (NS y
+    rango distintos a los del dashboard)."""
+
+    def _pedido(self, fecha, origen, atendido_a_tiempo):
+        producto = Producto.objects.create(
+            codigo=f'PIN-5{Producto.objects.count():02d}', nombre='Prod',
+            precio_venta='10.00', costo_compra='5.00', stock_actual=10,
+        )
+        pedido = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime.combine(fecha, datetime.min.time())),
+            cliente='C-001', canal=Pedido.Canal.MOSTRADOR, origen=origen,
+        )
+        PedidoDetalle.objects.create(
+            pedido=pedido, producto=producto, cantidad_solicitada=10,
+            cantidad_atendida=10 if atendido_a_tiempo else 0, atendido_a_tiempo=atendido_a_tiempo,
+        )
+        return producto
+
+    def test_usa_solo_el_origen_real_y_su_rango(self):
+        # Reales en agosto (1 de 2 a tiempo = 50%); prueba en septiembre,
+        # todos a tiempo: si se mezclaran, el NS subiría y el rango
+        # llegaría a septiembre.
+        self._pedido(date(2026, 8, 3), 'real', True)
+        self._pedido(date(2026, 8, 28), 'real', False)
+        self._pedido(date(2026, 9, 15), 'prueba', True)
+        self._pedido(date(2026, 9, 20), 'prueba', True)
+
+        contenido = indexador._documento_indicadores('real')[0][2]
+
+        self.assertIn('Indicadores del periodo 03/08/2026 al 28/08/2026', contenido)
+        self.assertIn('Nivel de servicio (NS): 50.00%.', contenido)
+        self.assertIn('origen "real"', contenido)
+        self.assertNotIn('09/2026', contenido)
+
+    def test_la_demanda_de_la_ficha_no_suma_pedidos_de_prueba(self):
+        producto = self._pedido(date(2026, 8, 28), 'real', True)
+        pedido_prueba = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime(2026, 8, 29)),
+            cliente='C-002', canal=Pedido.Canal.MOSTRADOR, origen='prueba',
+        )
+        PedidoDetalle.objects.create(pedido=pedido_prueba, producto=producto, cantidad_solicitada=99)
+
+        ficha = next(c for _, pk, c in indexador._documentos_producto('real') if pk == producto.pk)
+
+        # 30 días hasta la última fecha con datos reales (28/08), no hasta hoy.
+        self.assertIn('Demanda solicitada del 30/07/2026 al 28/08/2026: 10 unidades.', ficha)
+
+
+class IndexadorAnomaliasPorOrigenTests(TestCase):
+    """Las anomalías se filtran por el origen de su conteo físico, no por el
+    del producto: el catálogo es uno solo y casi todos sus productos se
+    cargaron como "prueba", aunque su conteo sea real."""
+
+    def _anomalia(self, origen_conteo, codigo):
+        producto = Producto.objects.create(
+            codigo=codigo, nombre='Prod', precio_venta='10.00', costo_compra='5.00', origen='prueba',
+        )
+        conteo = ConteoFisico.objects.create(fecha_corte=date(2026, 8, 24), responsable='Ana', origen=origen_conteo)
+        detalle = ConteoDetalle.objects.create(conteo=conteo, producto=producto, stock_sistema=10, stock_fisico=2)
+        return Anomalia.objects.create(
+            producto=producto, conteo_detalle=detalle, fecha_deteccion=timezone.now(),
+            tipo=Anomalia.Tipo.DIFERENCIA_INVENTARIO, severidad=Anomalia.Severidad.MEDIA,
+            score=0.5, valor_observado=-8, valor_esperado=0, descripcion='Conteo del 24/08: 2 físicas contra 10',
+        )
+
+    def test_cuenta_la_del_conteo_real_aunque_el_producto_sea_de_prueba(self):
+        real = self._anomalia('real', 'PIN-601')
+        self._anomalia('prueba', 'PIN-602')
+
+        anomalias = indexador._documentos_anomalia('real')
+        resumen = indexador._documento_resumen_anomalias('real')[0][2]
+
+        self.assertEqual([pk for _, pk, _ in anomalias], [real.pk])
+        self.assertIn('(1 en total)', resumen)
+
+    def test_resumen_anomalias_dice_que_no_hay_si_esta_vacio(self):
+        documentos = indexador._documento_resumen_anomalias('real')
         self.assertEqual(len(documentos), 1)
         self.assertIn('no hay anomalías', documentos[0][2])
 
 
-class IndexadorDocumentoIndicadoresUsaElRangoDelDashboardTests(TestCase):
-    """El documento de indicadores debe calcular EI/NS/COI con el mismo
-    rango de fechas y el mismo origen (sin filtrar) que ve el dueño al
-    abrir el dashboard sin tocar ningún filtro. Antes usaba una ventana fija
-    de 30 días, así que el mismo indicador podía dar dos valores distintos
-    según se consultara desde el dashboard o desde el asistente."""
+class OrigenAsistenteTests(TestCase):
+    def test_por_defecto_real_y_tolera_mayusculas(self):
+        self.assertEqual(origen_asistente(), 'real')
+        with override_settings(ASISTENTE_ORIGEN=' Prueba '):
+            self.assertEqual(origen_asistente(), 'prueba')
 
-    def test_usa_el_rango_completo_disponible_no_una_ventana_fija_de_30_dias(self):
-        producto = Producto.objects.create(
-            codigo='PIN-500', nombre='Prod', precio_venta='10.00', costo_compra='5.00', stock_actual=10,
+    @override_settings(ASISTENTE_ORIGEN='todos')
+    def test_valor_invalido_falla_con_mensaje_claro(self):
+        with self.assertRaises(ImproperlyConfigured):
+            origen_asistente()
+
+    def test_el_recuperador_solo_trae_documentos_del_origen_configurado(self):
+        DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.INDICADOR, contenido='Indicadores reales.', embedding=_vector(0), origen='real',
         )
-        # Muy afuera de cualquier ventana de "últimos 30 días" respecto a
-        # hoy: si el documento usara esa ventana fija, este pedido (y el NS
-        # que depende de él) quedaría fuera del cálculo.
-        fecha_vieja = date.today() - timedelta(days=200)
-        pedido = Pedido.objects.create(
-            fecha_solicitud=timezone.make_aware(datetime.combine(fecha_vieja, datetime.min.time())),
-            cliente='Cliente de prueba', canal=Pedido.Canal.MOSTRADOR,
+        DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.INDICADOR, contenido='Indicadores de prueba.', embedding=_vector(0), origen='prueba',
         )
-        PedidoDetalle.objects.create(
-            pedido=pedido, producto=producto, cantidad_solicitada=10, cantidad_atendida=10,
-            atendido_a_tiempo=True,
+        with patch('inventario.asistente.recuperador.generar_embedding', return_value=_vector(0)):
+            contenidos = [d.contenido for d in recuperador.recuperar_documentos('¿indicadores?', n=5)]
+        self.assertEqual(contenidos, ['Indicadores reales.'])
+
+    @override_settings(ASISTENTE_ORIGEN='prueba')
+    def test_indice_de_otro_origen_pide_reindexar_en_vez_de_mezclar(self):
+        DocumentoIndexado.objects.create(
+            tipo=TipoDocumento.INDICADOR, contenido='Indicadores reales.', embedding=_vector(0), origen='real',
         )
-
-        documentos = indexador._documento_indicadores()
-        contenido = documentos[0][2]
-
-        fecha_minima, fecha_maxima = rango_disponible(origen=None)
-        ns_esperado = calcular_ns(fecha_minima, fecha_maxima)
-
-        self.assertIn(f'{fecha_minima:%d/%m/%Y}', contenido)
-        self.assertIn(f'{fecha_maxima:%d/%m/%Y}', contenido)
-        self.assertIn(f'{ns_esperado["valor"]:.1f}%', contenido)
+        with patch('inventario.asistente.recuperador.generar_embedding', return_value=_vector(0)):
+            resultado = consultar_asistente('¿indicadores?')
+        self.assertIn('se construyó con otro origen', resultado.respuesta)
+        self.assertEqual(resultado.documentos, [])
 
 
 class IndexadorRecomendacionesAgrupaLasQueNoRequierenAccionTests(TestCase):

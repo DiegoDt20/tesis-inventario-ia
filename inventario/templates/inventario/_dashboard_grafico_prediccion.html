@@ -57,7 +57,10 @@ excedan ese rango.
                 <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea"></span> Histórico real</span>
                 {% if grafico_prediccion.hay_pronostico %}
                     <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea punteada"></span> Pronóstico</span>
-                    <span>Corte: {{ grafico_prediccion.fecha_corte|date:'d/m/Y' }}</span>
+                    <span title="El pronóstico se ancla al último dato real disponible, no a la fecha de hoy.">
+                        Histórico hasta el <strong>{{ grafico_prediccion.fecha_corte|date:'d/m/Y' }}</strong>:
+                        el pronóstico parte de esa fecha, no de hoy.
+                    </span>
                 {% else %}
                     <span>
                         Todavía no hay un pronóstico generado para
@@ -113,7 +116,38 @@ excedan ese rango.
                         Chart.defaults.font.size = 12;
                         Chart.defaults.color = colorTexto;
 
+                        // Línea vertical en la fecha de corte del histórico: marca
+                        // desde dónde parte el pronóstico (el último dato real,
+                        // no "hoy").
+                        const lineaCorte = {
+                            id: 'lineaCorte',
+                            afterDatasetsDraw: function (chart) {
+                                if (indiceCorte <= 0 || indiceCorte >= datos.length) {
+                                    return;
+                                }
+                                const x = chart.scales.x.getPixelForValue(indiceCorte - 1);
+                                const area = chart.chartArea;
+                                const ctx = chart.ctx;
+                                ctx.save();
+                                ctx.strokeStyle = colorTexto;
+                                ctx.lineWidth = 1;
+                                ctx.setLineDash([3, 3]);
+                                ctx.beginPath();
+                                ctx.moveTo(x, area.top);
+                                ctx.lineTo(x, area.bottom);
+                                ctx.stroke();
+                                ctx.setLineDash([]);
+                                ctx.fillStyle = colorTexto;
+                                ctx.font = "11px 'IBM Plex Sans', system-ui, sans-serif";
+                                ctx.textAlign = 'right';
+                                const partes = datos[indiceCorte - 1].fecha.split('-');
+                                ctx.fillText('Corte ' + partes[2] + '/' + partes[1], x - 4, area.top + 10);
+                                ctx.restore();
+                            },
+                        };
+
                         new Chart(lienzo, {
+                            plugins: [lineaCorte],
                             type: 'line',
                             data: {
                                 labels: etiquetas,

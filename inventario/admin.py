@@ -152,10 +152,10 @@ class PrediccionAdmin(admin.ModelAdmin):
 @admin.register(Recomendacion)
 class RecomendacionAdmin(admin.ModelAdmin):
     list_display = (
-        'producto', 'estado', 'stock_actual_snapshot', 'punto_reorden',
-        'cantidad_sugerida', 'aceptada', 'fecha_generacion',
+        'producto', 'estado', 'metodo', 'stock_actual_snapshot', 'punto_reorden',
+        'cantidad_sugerida', 'aceptada', 'fecha_corte_historico', 'fecha_generacion',
     )
-    list_filter = ('estado', 'aceptada')
+    list_filter = ('estado', 'metodo', 'aceptada')
     search_fields = ('producto__codigo', 'producto__nombre')
     readonly_fields = ('fecha_generacion', 'explicacion')
     date_hierarchy = 'fecha_generacion'
@@ -201,8 +201,8 @@ class DocumentoIndexadoAdmin(admin.ModelAdmin):
 
 @admin.register(ConsultaAsistente)
 class ConsultaAsistenteAdmin(admin.ModelAdmin):
-    list_display = ('fecha', 'usuario', 'pregunta')
-    list_filter = ('fecha', 'usuario')
+    list_display = ('fecha', 'usuario', 'pregunta', 'proveedor_llm', 'modelo_llm', 'fallo_llm')
+    list_filter = ('fecha', 'usuario', 'proveedor_llm', 'fallo_llm')
     search_fields = ('pregunta', 'respuesta')
-    readonly_fields = ('fecha',)
+    readonly_fields = ('fecha', 'proveedor_llm', 'modelo_llm', 'fallo_llm')
     date_hierarchy = 'fecha'

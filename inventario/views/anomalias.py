@@ -39,9 +39,7 @@ def _anomalias_no_revisadas(origen):
     """Anomalías (diferencias de inventario y movimientos atípicos) que
     todavía nadie marcó como revisadas, ordenadas por severidad (alta
     primero) y luego por fecha de detección más reciente."""
-    qs = Anomalia.objects.filter(revisada=False)
-    if origen:
-        qs = qs.filter(producto__origen=origen)
+    qs = Anomalia.objects.del_origen(origen).filter(revisada=False)
     return list(
         qs.select_related('producto').annotate(orden_severidad=_orden_severidad())
         .order_by('orden_severidad', '-fecha_deteccion')

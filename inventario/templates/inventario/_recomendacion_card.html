@@ -6,6 +6,7 @@
             <span class="badge-suave badge-suave-{{ r.estado|color_estado }}">
                 <i class="bi {{ r.estado|icono_estado }}"></i> {{ r.get_estado_display }}
             </span>
+            {% include 'inventario/_recomendacion_metodo.html' %}
             {% if r.aceptada is True %}
                 <span class="badge-suave badge-suave-success"><i class="bi bi-check-circle-fill"></i> Aceptada</span>
             {% elif r.aceptada is False %}
@@ -33,6 +34,12 @@
                 {% endif %}
             {% else %}
                 <span class="text-muted">No se sugiere pedir</span>
+            {% endif %}
+            {% if r.fecha_corte_historico %}
+                <span class="separador">·</span>
+                <span class="text-muted" title="Los números parten del histórico de pedidos hasta esta fecha, no de hoy.">
+                    Histórico hasta {{ r.fecha_corte_historico|date:'d/m/Y' }}
+                </span>
             {% endif %}
         </p>
 
@@ -72,7 +79,26 @@
                         {% endif %}
                     </dd>
 
-                    {% if r.demanda_categoria_periodo is not None %}
+                    <dt class="col-sm-4">Método</dt>
+                    <dd class="col-sm-8">
+                        {% if r.es_punto_reorden %}
+                            Punto de reorden y stock mínimo, sin demanda pronosticada: la categoría
+                            {{ r.producto.get_categoria_display }} no tiene suficientes días con venta para el modelo.
+                        {% else %}
+                            Pronóstico de demanda del modelo de predicción.
+                        {% endif %}
+                        {% if r.fecha_corte_historico %}
+                            Histórico hasta el {{ r.fecha_corte_historico|date:'d/m/Y' }}{% if not r.es_punto_reorden %}; el pronóstico parte de esa fecha, no de hoy{% endif %}.
+                        {% endif %}
+                    </dd>
+
+                    {% if r.es_punto_reorden %}
+                        <dt class="col-sm-4">Demanda histórica</dt>
+                        <dd class="col-sm-8">
+                            Promedio real de {{ r.demanda_diaria_historica|floatformat:2 }} u./día
+                            (días sin pedidos cuentan como cero)
+                        </dd>
+                    {% elif r.demanda_categoria_periodo is not None %}
                         <dt class="col-sm-4">Demanda de la categoría</dt>
                         <dd class="col-sm-8">
                             {{ r.demanda_categoria_periodo|floatformat:1 }} u. pronosticadas para {{ r.producto.get_categoria_display }}
@@ -88,8 +114,10 @@
                         <dd class="col-sm-8">{{ r.demanda_predicha_periodo|floatformat:1 }} u. en {{ r.dias_horizonte }} días (predicción por producto)</dd>
                     {% endif %}
 
-                    <dt class="col-sm-4">Demanda diaria</dt>
-                    <dd class="col-sm-8">{{ r.demanda_diaria|floatformat:2 }} u./día</dd>
+                    {% if not r.es_punto_reorden %}
+                        <dt class="col-sm-4">Demanda diaria</dt>
+                        <dd class="col-sm-8">{{ r.demanda_diaria|floatformat:2 }} u./día</dd>
+                    {% endif %}
 
                     <dt class="col-sm-4">Lead time</dt>
                     <dd class="col-sm-8">
@@ -104,15 +132,32 @@
                     </dd>
 
                     <dt class="col-sm-4">Punto de reorden</dt>
-                    <dd class="col-sm-8">demanda diaria × lead time + SS = {{ r.punto_reorden|floatformat:1 }}</dd>
+                    {% if r.es_punto_reorden %}
+                        <dd class="col-sm-8">
+                            mayor entre demanda diaria × lead time + SS ({{ r.punto_reorden_calculado|floatformat:1 }})
+                            y stock mínimo ({{ r.stock_minimo_snapshot|default:0 }}) = {{ r.punto_reorden|floatformat:1 }}
+                        </dd>
+                    {% else %}
+                        <dd class="col-sm-8">demanda diaria × lead time + SS = {{ r.punto_reorden|floatformat:1 }}</dd>
+                    {% endif %}
 
                     <dt class="col-sm-4">Cantidad sugerida</dt>
+                    {% if r.es_punto_reorden %}
+                    <dd class="col-sm-8">
+                        mayor entre (demanda histórica × {{ r.dias_horizonte }} días + SS) y punto de reorden,
+                        − stock − en tránsito =
+                        max({{ r.demanda_historica_periodo|floatformat:1 }} + {{ r.stock_seguridad|floatformat:1 }}, {{ r.punto_reorden|floatformat:1 }})
+                        − {{ r.stock_actual_snapshot }} − {{ r.pedidos_en_transito|default:0 }}
+                        = {{ r.cantidad_sugerida|floatformat:1 }} → {{ r.unidades_sugeridas }} u.{% if r.cantidad_sugerida <= 0 %} (sin pedido){% endif %}
+                    </dd>
+                    {% else %}
                     <dd class="col-sm-8">
                         demanda del periodo + SS − stock − en tránsito =
                         {{ r.demanda_predicha_periodo|floatformat:1 }} + {{ r.stock_seguridad|floatformat:1 }}
                         − {{ r.stock_actual_snapshot }} − {{ r.pedidos_en_transito|default:0 }}
                         = {{ r.cantidad_sugerida|floatformat:1 }} → {{ r.unidades_sugeridas }} u.{% if r.cantidad_sugerida <= 0 %} (sin pedido){% endif %}
                     </dd>
+                    {% endif %}
 
                     {% if r.unidades_sugeridas %}
                         <dt class="col-sm-4">Costo estimado</dt>

@@ -20,6 +20,7 @@ from pgvector.django import CosineDistance
 
 from inventario.models import DocumentoIndexado, Recomendacion, TipoDocumento
 
+from .configuracion import origen_asistente
 from .embeddings import generar_embedding
 
 N_DOCUMENTOS_DEFECTO = 5
@@ -147,7 +148,9 @@ def recuperar_documentos(pregunta, n=N_DOCUMENTOS_DEFECTO):
     sobre recomendaciones que no califican como generales, siempre se
     incluye el resumen de estados (ver _recuperar_priorizando_recomendaciones)."""
     embedding_pregunta = generar_embedding(pregunta)
-    qs = DocumentoIndexado.objects.annotate(
+    # Solo documentos indexados con el origen configurado: si alguien cambia
+    # ASISTENTE_ORIGEN sin reindexar, no se mezclan con los de otro origen.
+    qs = DocumentoIndexado.objects.filter(origen=origen_asistente()).annotate(
         distancia=CosineDistance('embedding', embedding_pregunta),
     )
 

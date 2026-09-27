@@ -213,3 +213,47 @@ class ConteoFisicoTests(TestCase):
         self.assertEqual(ConteoDetalle.objects.filter(conteo=conteo).count(), 2)
         nuevo_detalle = ConteoDetalle.objects.get(conteo=conteo, producto=otro_producto)
         self.assertEqual(nuevo_detalle.diferencia, -2)
+
+
+class DashboardOrigenTests(TestCase):
+    """El dashboard (origen "real") debe coincidir con el asistente: las
+    anomalías se filtran por el origen de su conteo, no del producto, y las
+    recomendaciones cubren el catálogo completo."""
+
+    def setUp(self):
+        from django.utils import timezone
+        from ..models import Anomalia, Recomendacion
+        self.Anomalia, self.Recomendacion, self.ahora = Anomalia, Recomendacion, timezone.now()
+        # Producto de catálogo cargado como "prueba", contado en un conteo real.
+        self.producto = Producto.objects.create(
+            codigo='PIN-D1', nombre='Latex', precio_venta=10, costo_compra=5, origen='prueba',
+        )
+
+    def _anomalia(self, origen_conteo):
+        conteo = ConteoFisico.objects.create(fecha_corte=date(2026, 8, 24), responsable='Ana', origen=origen_conteo)
+        detalle = ConteoDetalle.objects.create(conteo=conteo, producto=self.producto, stock_sistema=10, stock_fisico=2)
+        return self.Anomalia.objects.create(
+            producto=self.producto, conteo_detalle=detalle, fecha_deteccion=self.ahora,
+            tipo='diferencia_inventario', severidad='media', score=0.5,
+            valor_observado=-8, valor_esperado=0, descripcion='x',
+        )
+
+    def test_anomalias_por_origen_del_conteo(self):
+        from ..views.anomalias import _anomalias_no_revisadas
+        from ..views.dashboard import _anomalias_por_severidad
+        real = self._anomalia('real')
+        self._anomalia('prueba')
+
+        self.assertEqual([a.pk for a in _anomalias_no_revisadas('real')], [real.pk])
+        self.assertEqual(_anomalias_por_severidad('real')['total'], 1)
+
+    def test_recomendaciones_de_productos_de_prueba_si_aparecen(self):
+        from ..views.dashboard import _recomendaciones_urgentes, _salud_catalogo
+        self.Recomendacion.objects.create(
+            producto=self.producto, fecha_generacion=self.ahora, estado='critico',
+            stock_actual_snapshot=0, demanda_predicha_periodo=30, desviacion_demanda=1, lead_time_usado=7,
+            stock_seguridad=4, punto_reorden=11, cantidad_sugerida=34, nivel_servicio_objetivo=0.95,
+            explicacion='x',
+        )
+        self.assertEqual(len(_recomendaciones_urgentes()), 1)
+        self.assertEqual(_salud_catalogo()['total'], 1)

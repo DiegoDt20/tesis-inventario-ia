@@ -2,6 +2,7 @@
 que alimenta el RAG del asistente conversacional."""
 from django.core.management.base import BaseCommand
 
+from inventario.asistente.configuracion import origen_asistente
 from inventario.asistente.indexador import reindexar
 
 
@@ -15,4 +16,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         total = reindexar()
-        self.stdout.write(self.style.SUCCESS(f'Índice regenerado: {total} documento(s) indexado(s).'))
+        self.stdout.write(self.style.SUCCESS(
+            f'Índice regenerado: {total} documento(s) indexado(s) con datos de origen '
+            f'"{origen_asistente()}" (ASISTENTE_ORIGEN).'
+        ))

@@ -1,4 +1,5 @@
-"""Pantalla del asistente conversacional (RAG + LLM local vía Ollama)."""
+"""Pantalla del asistente conversacional (RAG + LLM: Ollama local o Claude vía
+la API de Anthropic, según LLM_PROVEEDOR)."""
 import json
 
 from django.contrib.auth.decorators import login_required
@@ -38,6 +39,9 @@ def asistente_chat(request):
                 respuesta=resultado.respuesta,
                 documentos_usados=documentos_usados,
                 usuario=request.user,
+                proveedor_llm=resultado.proveedor,
+                modelo_llm=resultado.modelo,
+                fallo_llm=resultado.fallo,
             )
 
             historial.append({
@@ -84,8 +88,8 @@ def _evento_sse(nombre, datos):
 @login_required
 def asistente_stream(request):
     """Respuesta del asistente en tiempo real: Server-Sent Events con un
-    evento 'fragmento' por cada trozo de texto que Ollama va generando
-    (stream=True en proveedores.py) y un evento final 'fin' con el texto
+    evento 'fragmento' por cada trozo de texto que el LLM va generando
+    (generar_respuesta_stream en proveedores.py) y un evento final 'fin' con el texto
     completo y las fuentes. GET porque EventSource (la API del navegador
     para SSE) solo puede hacer peticiones GET.
 
@@ -126,6 +130,7 @@ def asistente_stream(request):
                 ConsultaAsistente.objects.create(
                     pregunta=pregunta, respuesta=respuesta_completa,
                     documentos_usados=documentos_usados, usuario=request.user,
+                    proveedor_llm=evento['proveedor'], modelo_llm=evento['modelo'], fallo_llm=fallo,
                 )
                 yield _evento_sse('fin', {
                     'respuesta': respuesta_completa, 'documentos': documentos_usados, 'fallo': fallo,

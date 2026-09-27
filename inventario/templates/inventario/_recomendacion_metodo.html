@@ -1,0 +1,16 @@
+{% comment %}
+Distintivo del método con que se calculó la recomendación "r": pronóstico
+del modelo, o solo punto de reorden y stock mínimo (sin demanda
+pronosticada). Compartido por la tarjeta de recomendaciones y la
+recomendación destacada del dashboard.
+{% endcomment %}
+{% if r.es_punto_reorden %}
+    <span class="badge-suave badge-suave-secondary"
+          title="Sin demanda pronosticada: la categoría no tiene suficientes días con venta para el modelo. Se usa la demanda promedio real y el stock mínimo.">
+        <i class="bi bi-rulers"></i> Punto de reorden
+    </span>
+{% else %}
+    <span class="badge-suave badge-suave-info" title="Demanda pronosticada por el modelo de predicción.">
+        <i class="bi bi-graph-up-arrow"></i> Pronóstico
+    </span>
+{% endif %}

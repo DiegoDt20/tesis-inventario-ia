@@ -1274,6 +1274,12 @@ a.buscador-fila:hover {
     border-color: var(--linea);
 }
 
+.badge-suave-info {
+    color: var(--acento);
+    background-color: var(--acento-claro);
+    border-color: var(--acento-claro);
+}
+
 /* ------------------------------------------------------------------ */
 /* Ranking horizontal: lista de barras de un solo color — el largo de la
    barra ya dice cuál es más grande, el color no necesita repetirlo. */

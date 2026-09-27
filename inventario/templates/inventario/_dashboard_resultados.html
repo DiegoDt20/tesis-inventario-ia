@@ -92,11 +92,15 @@
                     <span class="badge-suave badge-suave-{{ recomendacion_destacada.estado|color_estado }} ms-2">
                         <i class="bi {{ recomendacion_destacada.estado|icono_estado }}"></i> {{ recomendacion_destacada.get_estado_display }}
                     </span>
+                    {% include 'inventario/_recomendacion_metodo.html' with r=recomendacion_destacada %}
                 </p>
                 <p class="recomendacion-destacada-detalle mb-0">
                     {{ recomendacion_destacada.producto.codigo }} — {{ recomendacion_destacada.producto.nombre }}
                     {{ recomendacion_destacada.producto.presentacion }} · Cantidad sugerida:
                     {{ recomendacion_destacada.cantidad_sugerida|floatformat:0 }} u.
+                    {% if recomendacion_destacada.fecha_corte_historico %}
+                        · <span class="text-muted">Histórico hasta {{ recomendacion_destacada.fecha_corte_historico|date:'d/m/Y' }}</span>
+                    {% endif %}
                 </p>
                 <div class="recomendacion-destacada-acciones">
                     <button type="button" class="btn btn-primary btn-sm"

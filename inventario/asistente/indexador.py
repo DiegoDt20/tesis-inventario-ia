@@ -11,17 +11,23 @@ el inventario?") tenga algo mejor que responder que fichas de producto
 sueltas: son los que
 inventario/asistente/recuperador.py prioriza para ese tipo de pregunta.
 
+Todo lo que depende de datos pretest/postest (indicadores, rango de
+fechas, demanda por producto, anomalías) se calcula SOLO con el origen
+configurado en ASISTENTE_ORIGEN ("real" por defecto, como el dashboard),
+nunca mezclando datos de prueba con reales. El catálogo (productos, stock,
+categorías), las recomendaciones y el modelo activo no tienen origen: son
+uno solo.
+
 Cada documento se guarda con su embedding (generado localmente, ver
-embeddings.py) en DocumentoIndexado. El comando "indexar_conocimiento"
-llama a reindexar() para regenerar el índice completo.
+embeddings.py) y el origen usado en DocumentoIndexado. El comando
+"indexar_conocimiento" llama a reindexar() para regenerar el índice
+completo.
 """
 from datetime import date, timedelta
 
 from django.db.models import Count, Sum
 
-from inventario.servicios.indicadores import (
-    calcular_coi, calcular_ei, calcular_ns, hay_mezcla_de_origenes, rango_disponible,
-)
+from inventario.servicios.indicadores import calcular_coi, calcular_ei, calcular_ns, rango_disponible
 from inventario.models import (
     Anomalia,
     Categoria,
@@ -33,33 +39,41 @@ from inventario.models import (
     TipoDocumento,
 )
 
+from .configuracion import origen_asistente
 from .embeddings import generar_embedding
 
 # Ventana usada para "demanda reciente" en la ficha de producto. No se usa
-# para el documento de indicadores: ese usa el mismo rango sin filtrar que
-# el dashboard (ver _documento_indicadores), para que el mismo indicador no
+# para el documento de indicadores: ese usa el mismo rango completo que el
+# dashboard (ver _documento_indicadores), para que el mismo indicador no
 # dé dos valores distintos según dónde se consulte.
 DIAS_PERIODO_RECIENTE = 30
 
 
-def _documentos_producto():
-    hoy = date.today()
-    desde = hoy - timedelta(days=DIAS_PERIODO_RECIENTE)
+def _documentos_producto(origen):
+    """Ficha de cada producto activo. La demanda reciente son los últimos
+    DIAS_PERIODO_RECIENTE días DE DATOS del origen (hasta la última fecha
+    con datos, no hasta hoy): si se contara hasta hoy, con datos reales que
+    terminan antes quedaría casi en cero o, sin filtrar por origen,
+    sumaría pedidos de prueba."""
+    _, fecha_maxima = rango_disponible(origen=origen)
+    hasta = fecha_maxima or date.today()
+    desde = hasta - timedelta(days=DIAS_PERIODO_RECIENTE - 1)
+    demanda_por_producto = dict(
+        PedidoDetalle.objects.filter(
+            pedido__origen=origen,
+            pedido__fecha_solicitud__date__gte=desde,
+            pedido__fecha_solicitud__date__lte=hasta,
+        ).values_list('producto_id').annotate(total=Sum('cantidad_solicitada'))
+    )
     documentos = []
     for producto in Producto.objects.filter(activo=True):
-        demanda_reciente = PedidoDetalle.objects.filter(
-            producto=producto,
-            pedido__fecha_solicitud__date__gte=desde,
-            pedido__fecha_solicitud__date__lte=hoy,
-        ).aggregate(total=Sum('cantidad_solicitada'))['total'] or 0
-
         contenido = (
             f'Producto {producto.codigo} — {producto.nombre}. '
             f'Categoría: {producto.get_categoria_display()}. '
             f'Stock actual: {producto.stock_actual} unidades. '
             f'Precio de venta: S/ {producto.precio_venta}. '
-            f'Demanda solicitada en los últimos {DIAS_PERIODO_RECIENTE} días: '
-            f'{demanda_reciente} unidades.'
+            f'Demanda solicitada del {desde:%d/%m/%Y} al {hasta:%d/%m/%Y}: '
+            f'{demanda_por_producto.get(producto.pk, 0)} unidades.'
         )
         documentos.append((TipoDocumento.PRODUCTO, producto.pk, contenido))
     return documentos
@@ -89,16 +103,17 @@ def _documentos_recomendacion():
     for recomendacion in recomendaciones:
         contenido = (
             f'Recomendación vigente para {recomendacion.producto.codigo} — '
-            f'{recomendacion.producto.nombre} ({recomendacion.get_estado_display()}): pedir '
+            f'{recomendacion.producto.nombre} ({recomendacion.get_estado_display()}, método '
+            f'{recomendacion.get_metodo_display().lower()}): pedir '
             f'{recomendacion.cantidad_sugerida:.0f} unidades. {recomendacion.explicacion}'
         )
         documentos.append((TipoDocumento.RECOMENDACION, recomendacion.pk, contenido))
     return documentos
 
 
-def _documentos_anomalia():
+def _documentos_anomalia(origen):
     documentos = []
-    for anomalia in Anomalia.objects.filter(revisada=False).select_related('producto'):
+    for anomalia in Anomalia.objects.del_origen(origen).filter(revisada=False).select_related('producto'):
         # La descripción ya no nombra el producto (en pantalla va en su
         # propia columna); el documento del RAG sí lo necesita.
         contenido = (
@@ -110,43 +125,42 @@ def _documentos_anomalia():
     return documentos
 
 
-def _documento_indicadores():
-    """Mismo cálculo, mismo rango de fechas y mismo origen (sin filtrar) que
-    ve el dueño al abrir el dashboard sin tocar ningún filtro: si acá se
-    usara una ventana distinta (p. ej. "últimos 30 días" fijo), el mismo
-    indicador daría un número distinto según se consulte desde el dashboard
-    o desde el asistente, lo cual no tiene sentido para un solo indicador.
-    """
-    fecha_minima, fecha_maxima = rango_disponible(origen=None)
+def _documento_indicadores(origen):
+    """Mismo cálculo, mismo origen y mismo rango de fechas que ve el dueño
+    al abrir el dashboard sin tocar ningún filtro: el rango de los datos
+    disponibles DE ESE ORIGEN (no uno que incluya fechas de datos de
+    prueba). Si acá se usara otra ventana u otro origen, el mismo indicador
+    daría un número distinto según se consulte desde el dashboard o desde
+    el asistente."""
+    fecha_minima, fecha_maxima = rango_disponible(origen=origen)
     hoy = date.today()
     fecha_fin = fecha_maxima or hoy
     fecha_inicio = fecha_minima or fecha_fin
 
-    ei = calcular_ei(fecha_inicio, fecha_fin)
-    ns = calcular_ns(fecha_inicio, fecha_fin)
-    coi = calcular_coi(fecha_inicio, fecha_fin)
+    ei = calcular_ei(fecha_inicio, fecha_fin, origen=origen)
+    ns = calcular_ns(fecha_inicio, fecha_fin, origen=origen)
+    coi = calcular_coi(fecha_inicio, fecha_fin, origen=origen)
 
     texto_ei = (
-        f'Exactitud del inventario (EI): {ei["valor"]:.1f}%.' if ei['valor'] is not None
+        f'Exactitud del inventario (EI): {ei["valor"]:.2f}%.' if ei['valor'] is not None
         else 'Exactitud del inventario (EI): sin conteos físicos en el periodo.'
     )
     texto_ns = (
-        f'Nivel de servicio (NS): {ns["valor"]:.1f}%.' if ns['valor'] is not None
+        f'Nivel de servicio (NS): {ns["valor"]:.2f}%.' if ns['valor'] is not None
         else 'Nivel de servicio (NS): sin pedidos en el periodo.'
     )
     texto_coi = (
-        f'Costos operativos de inventario (COI): S/ {coi["valor"]:.2f}.' if coi['tiene_datos']
+        f'Costos operativos de inventario (COI): S/ {coi["valor"]:.2f} '
+        f'(almacenamiento S/ {coi["almacenamiento"]:.2f} + pérdidas por desabastecimiento '
+        f'S/ {coi["desabastecimiento"]:.2f}).' if coi['tiene_datos']
         else 'Costos operativos de inventario (COI): sin datos en el periodo.'
-    )
-    texto_mezcla = (
-        ' Advertencia: este cálculo mezcla datos de prueba y datos reales.'
-        if hay_mezcla_de_origenes() else ''
     )
 
     contenido = (
-        f'Indicadores del periodo {fecha_inicio:%d/%m/%Y} al {fecha_fin:%d/%m/%Y} '
-        f'(el mismo rango completo que muestra el dashboard sin filtros aplicados): '
-        f'{texto_ei} {texto_ns} {texto_coi}{texto_mezcla}'
+        f'Indicadores del periodo {fecha_inicio:%d/%m/%Y} al {fecha_fin:%d/%m/%Y}, '
+        f'calculados solo con datos de origen "{origen}" (el mismo rango completo y el mismo '
+        f'origen que muestra el dashboard sin filtros aplicados): '
+        f'{texto_ei} {texto_ns} {texto_coi}'
     )
     return [(TipoDocumento.INDICADOR, None, contenido)]
 
@@ -224,13 +238,13 @@ def _documento_resumen_estado():
     return [(TipoDocumento.RESUMEN_ESTADO, None, contenido)]
 
 
-def _documento_resumen_anomalias():
+def _documento_resumen_anomalias(origen):
     """Conteo de anomalías sin revisar por severidad: siempre se genera,
     incluso en cero, para que el asistente pueda decir "no hay anomalías
     pendientes" en vez de no tener nada que decir al respecto."""
     conteos = {severidad: 0 for severidad in Anomalia.Severidad.values}
     filas = (
-        Anomalia.objects.filter(revisada=False)
+        Anomalia.objects.del_origen(origen).filter(revisada=False)
         .values('severidad').annotate(total=Count('id'))
     )
     for fila in filas:
@@ -249,31 +263,35 @@ def _documento_resumen_anomalias():
     return [(TipoDocumento.RESUMEN_ANOMALIAS, None, contenido)]
 
 
-def construir_documentos():
+def construir_documentos(origen=None):
     """Arma la lista completa de documentos (tipo, referencia_id,
-    contenido) a indexar, sin generar todavía los embeddings."""
+    contenido) a indexar, sin generar todavía los embeddings. `origen`:
+    por defecto el configurado en ASISTENTE_ORIGEN."""
+    origen = origen or origen_asistente()
     documentos = []
-    documentos += _documentos_producto()
+    documentos += _documentos_producto(origen)
     documentos += _documentos_recomendacion()
-    documentos += _documentos_anomalia()
-    documentos += _documento_indicadores()
+    documentos += _documentos_anomalia(origen)
+    documentos += _documento_indicadores(origen)
     documentos += _documento_modelo()
     documentos += _documentos_resumen_categoria()
     documentos += _documento_resumen_estado()
-    documentos += _documento_resumen_anomalias()
+    documentos += _documento_resumen_anomalias(origen)
     return documentos
 
 
 def reindexar():
-    """Regenera el índice completo: borra los DocumentoIndexado existentes
-    y crea uno nuevo por cada elemento de construir_documentos(), con su
-    embedding. Devuelve la cantidad de documentos indexados."""
-    documentos = construir_documentos()
+    """Regenera el índice completo con el origen de ASISTENTE_ORIGEN: borra
+    los DocumentoIndexado existentes y crea uno nuevo por cada elemento de
+    construir_documentos(), con su embedding y su origen. Devuelve la
+    cantidad de documentos indexados."""
+    origen = origen_asistente()
+    documentos = construir_documentos(origen)
     DocumentoIndexado.objects.all().delete()
     nuevos = [
         DocumentoIndexado(
             tipo=tipo, referencia_id=referencia_id, contenido=contenido,
-            embedding=generar_embedding(contenido),
+            embedding=generar_embedding(contenido), origen=origen,
         )
         for tipo, referencia_id, contenido in documentos
     ]

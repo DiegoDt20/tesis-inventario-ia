@@ -171,7 +171,26 @@ Ya no están fuera de alcance: los tres están implementados y en uso.
   cálculo en pantalla (horizonte, demanda de la categoría, participación
   aplicada, origen del lead time, pedidos en tránsito); el costo estimado
   y los días de cobertura se calculan al mostrarla, con el costo de compra
-  actual del producto.
+  actual del producto. La desviación de la demanda (stock de seguridad) usa solo pedidos
+  del origen de `generar_recomendaciones --origen` (`real` por defecto;
+  queda en `Recomendacion.origen_demanda`, null en lotes anteriores que
+  mezclaban orígenes) y se calcula sobre todos los días del periodo de ese
+  origen, con cero los días sin pedidos (no con `features._densificar`,
+  que solo rellena entre el primer y el último pedido de cada producto y
+  daba desviación 0 a los productos con un solo pedido). Ojo: la demanda
+  pronosticada (`Prediccion`) sale de `predecir_demanda --origen`, cuyo
+  valor por defecto no filtra por origen: correrlo con `--origen real`
+  (`generar_recomendaciones` avisa si el lote parte de otra fecha de corte).
+  El motor y el gráfico del dashboard usan solo el último lote de
+  predicciones (`Prediccion.fecha_ultimo_lote()`), nunca uno anterior del
+  mismo producto. Los productos sin pronóstico en ese lote (categorías que
+  no llegan a `MIN_DIAS_VENTA_CATEGORIA` días con venta; con datos reales
+  de agosto: solvente, temple y base) no se omiten: se recomiendan con
+  `Recomendacion.Metodo.PUNTO_REORDEN` (demanda diaria promedio real en vez
+  de la pronosticada, punto de reorden con piso en `stock_minimo`). Cada
+  recomendación guarda `metodo` y `fecha_corte_historico` (último día del
+  histórico; el pronóstico parte de ahí, no de hoy), y la tarjeta y el
+  gráfico los muestran.
 - **Detección de anomalías** (`inventario/ml/anomalias.py`) — Isolation
   Forest + regla del 20% sobre diferencias de inventario
   (`ConteoDetalle`), y z-score sobre el histórico propio de cada producto
@@ -190,12 +209,28 @@ Ya no están fuera de alcance: los tres están implementados y en uso.
   periodo, estado del modelo) con embeddings de `sentence-transformers`
   (`paraphrase-multilingual-MiniLM-L12-v2`, local); `recuperador.py` trae
   contexto por similitud coseno; `asistente.py` arma el prompt y llama al
-  LLM configurado (`proveedores.py`, Ollama por defecto — ver
-  `LLM_PROVEEDOR`/`LLM_MODELO`/`LLM_URL`); `anonimizador.py` redacta
-  nombres de clientes, razón social, correos y teléfonos antes de enviar
-  cualquier contexto al LLM. El LLM nunca calcula cifras, solo redacta las
-  que ya vienen en el contexto recuperado; si el proveedor falla, se
-  muestran los datos crudos sin redactar. Comando `indexar_conocimiento`.
+  LLM configurado (`proveedores.py`: `ollama` local por defecto, o
+  `anthropic` = Claude vía API externa con el SDK `anthropic`; ver
+  `LLM_PROVEEDOR`/`LLM_MODELO`/`LLM_URL`/`ANTHROPIC_API_KEY`, la clave
+  solo en `.env`); `anonimizador.py` redacta nombres de clientes (sin
+  distinguir mayúsculas), razón social, correos y teléfonos antes de
+  enviar cualquier contexto al LLM, y con Anthropic es obligatoria:
+  `ProveedorAnthropic` la vuelve a aplicar a cada mensaje justo antes de
+  enviarlo. Lo único que se envía es el prompt de sistema, el contexto
+  recuperado y la pregunta, anonimizados. El LLM nunca calcula cifras,
+  solo redacta las que ya vienen en el contexto recuperado; si el
+  proveedor falla, se muestran los datos crudos sin redactar (y con
+  Anthropic la falla queda en el log con el código HTTP).
+  `ConsultaAsistente` registra `proveedor_llm`, `modelo_llm` (el que
+  informó el servicio) y `fallo_llm`. Comando `indexar_conocimiento`.
+  Indexa y responde solo con el origen de `ASISTENTE_ORIGEN` (`real` por
+  defecto, como el dashboard): indicadores y rango de fechas de ese
+  origen, demanda por producto sin pedidos de otro origen, y anomalías
+  filtradas por el origen de su conteo/movimiento (no por el del
+  producto; `Anomalia.objects.del_origen()`, el mismo filtro que usa el
+  dashboard). No califica cifras ("bajo", "alto") salvo que la
+  calificación o el umbral vengan en el contexto. Cada `DocumentoIndexado` guarda su `origen` y el recuperador
+  solo trae los del origen configurado; tras cambiarlo, reindexar.
 
 Frontend (más allá de las plantillas Django + Bootstrap ya implementadas)
 sigue fuera de alcance salvo que el usuario indique lo contrario.

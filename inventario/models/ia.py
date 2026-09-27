@@ -116,6 +116,17 @@ class Prediccion(models.Model):
     def __str__(self):
         return f'{self.producto.codigo} - {self.fecha_objetivo}'
 
+    @classmethod
+    def fecha_ultimo_lote(cls):
+        """fecha_generacion de la corrida más reciente de "predecir_demanda"
+        (el lote vigente), o None si nunca se predijo. El motor de decisiones
+        y el gráfico del dashboard usan SOLO este lote: un producto que no
+        aparece en él (p. ej. su categoría quedó fuera del modelo por no
+        tener días con venta suficientes) no tiene pronóstico vigente,
+        aunque conserve predicciones de corridas anteriores, que pudieron
+        hacerse con otro origen de datos."""
+        return cls.objects.order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
+
 
 class Recomendacion(models.Model):
     """Recomendación de reposición generada por el motor de decisiones
@@ -128,6 +139,15 @@ class Recomendacion(models.Model):
         NORMAL = 'normal', 'Normal'
         EXCESO = 'exceso', 'Exceso'
 
+    class Metodo(models.TextChoices):
+        """De dónde sale la demanda con que se calculó la recomendación."""
+        # Demanda pronosticada por el modelo de ML (Prediccion del lote vigente).
+        PRONOSTICO = 'pronostico', 'Pronóstico'
+        # Sin pronóstico (la categoría no alcanza los días con venta que
+        # exige el modelo): punto de reorden con la demanda diaria promedio
+        # real y, como piso, el stock mínimo del producto.
+        PUNTO_REORDEN = 'punto_reorden', 'Punto de reorden'
+
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='recomendaciones')
     # Sin auto_now_add a propósito, igual que Prediccion.fecha_generacion:
     # todas las recomendaciones de una misma corrida de
@@ -135,8 +155,21 @@ class Recomendacion(models.Model):
     # explícito), para poder agruparlas como un solo lote.
     fecha_generacion = models.DateTimeField(db_index=True)
     estado = models.CharField(max_length=10, choices=Estado.choices, db_index=True)
+    # Los lotes anteriores a este campo se calcularon todos con pronóstico.
+    metodo = models.CharField(max_length=15, choices=Metodo.choices, default=Metodo.PRONOSTICO, db_index=True)
     stock_actual_snapshot = models.IntegerField()
-    demanda_predicha_periodo = models.FloatField()
+    # Null con metodo=PUNTO_REORDEN: ese producto no tiene demanda pronosticada.
+    demanda_predicha_periodo = models.FloatField(null=True, blank=True)
+    # Solo con metodo=PUNTO_REORDEN: demanda diaria promedio real del
+    # periodo histórico (días sin pedidos cuentan como cero).
+    demanda_diaria_historica = models.FloatField(null=True, blank=True)
+    # Solo con metodo=PUNTO_REORDEN: stock mínimo de la ficha al generar la
+    # recomendación, usado como piso del punto de reorden.
+    stock_minimo_snapshot = models.IntegerField(null=True, blank=True)
+    # Último día del histórico de pedidos del que parten los números (el
+    # pronóstico empieza al día siguiente, no "hoy"). Null en lotes
+    # anteriores a este campo.
+    fecha_corte_historico = models.DateField(null=True, blank=True)
     desviacion_demanda = models.FloatField()
     lead_time_usado = models.FloatField()
     stock_seguridad = models.FloatField()
@@ -148,6 +181,7 @@ class Recomendacion(models.Model):
     # antes de que existieran estos campos.
     # Días de predicción sumados en demanda_predicha_periodo (el horizonte
     # de cobertura, o menos si el lote de predicciones no llegaba a tanto).
+    # Con metodo=PUNTO_REORDEN, los días de cobertura sin más.
     dias_horizonte = models.IntegerField(null=True, blank=True)
     # Si la predicción fue a nivel de categoría: demanda predicha de toda la
     # categoría en el mismo horizonte y participación histórica del producto
@@ -158,6 +192,10 @@ class Recomendacion(models.Model):
     # False si es el configurado en la ficha del producto.
     lead_time_es_real = models.BooleanField(null=True, blank=True)
     pedidos_en_transito = models.IntegerField(null=True, blank=True)
+    # Origen de los pedidos con que se calculó la desviación de la demanda
+    # (y por ella el stock de seguridad). Null en los lotes generados antes
+    # de este campo: esos mezclaban pedidos de prueba y reales.
+    origen_demanda = models.CharField(max_length=10, choices=Origen.choices, null=True, blank=True)
     explicacion = models.TextField()
     # None = todavía sin decisión; True/False = el usuario la siguió o no.
     # Es el dato clave para la discusión de la tesis (¿se confía en el
@@ -192,10 +230,35 @@ class Recomendacion(models.Model):
         return self.unidades_sugeridas * self.producto.costo_compra
 
     @property
+    def es_punto_reorden(self):
+        return self.metodo == self.Metodo.PUNTO_REORDEN
+
+    @property
     def demanda_diaria(self):
-        if not self.dias_horizonte:
+        """Demanda diaria con que se calculó: la pronosticada promedio, o la
+        histórica real si la recomendación es solo por punto de reorden."""
+        if self.es_punto_reorden:
+            return self.demanda_diaria_historica
+        if not self.dias_horizonte or self.demanda_predicha_periodo is None:
             return None
         return self.demanda_predicha_periodo / self.dias_horizonte
+
+    @property
+    def punto_reorden_calculado(self):
+        """demanda diaria × lead time + SS, antes de aplicar el piso del stock
+        mínimo (solo difiere de punto_reorden con metodo=PUNTO_REORDEN)."""
+        demanda_diaria = self.demanda_diaria
+        if demanda_diaria is None:
+            return None
+        return demanda_diaria * self.lead_time_usado + self.stock_seguridad
+
+    @property
+    def demanda_historica_periodo(self):
+        """Con metodo=PUNTO_REORDEN: demanda histórica promedio × días de
+        cobertura (lo que se usa en lugar de la demanda pronosticada)."""
+        if not self.es_punto_reorden or self.demanda_diaria_historica is None or not self.dias_horizonte:
+            return None
+        return self.demanda_diaria_historica * self.dias_horizonte
 
     @property
     def participacion_pct(self):
@@ -209,6 +272,21 @@ class Recomendacion(models.Model):
         if not demanda_diaria or demanda_diaria <= 0:
             return None
         return self.unidades_sugeridas / demanda_diaria
+
+
+class AnomaliaQuerySet(models.QuerySet):
+    def del_origen(self, origen):
+        """Anomalías cuyo conteo físico o movimiento de origen es del
+        origen dado (prueba/real); sin `origen`, todas. Se filtra por la
+        fuente de la anomalía, NO por Producto.origen: el catálogo es uno
+        solo y la mayoría de sus productos se cargaron con origen "prueba",
+        aunque su conteo sea real. Única definición del filtro, compartida
+        por el dashboard, la pantalla de anomalías y el asistente."""
+        if not origen:
+            return self
+        return self.filter(
+            models.Q(conteo_detalle__conteo__origen=origen) | models.Q(movimiento__origen=origen),
+        )
 
 
 class Anomalia(models.Model):
@@ -264,6 +342,8 @@ class Anomalia(models.Model):
     motivo_revision = models.CharField(max_length=25, choices=MotivoRevision.choices, blank=True, db_index=True)
     detalle_revision = models.CharField(max_length=200, blank=True)
 
+    objects = AnomaliaQuerySet.as_manager()
+
     class Meta:
         verbose_name = 'Anomalía'
         verbose_name_plural = 'Anomalías'
@@ -314,6 +394,11 @@ class DocumentoIndexado(models.Model):
     referencia_id = models.IntegerField(null=True, blank=True)
     contenido = models.TextField()
     embedding = VectorField(dimensions=384)
+    # Origen de datos con el que se construyó el índice (ASISTENTE_ORIGEN al
+    # correr "indexar_conocimiento"). El recuperador solo trae documentos
+    # del origen configurado, así que cambiar ASISTENTE_ORIGEN sin
+    # reindexar no mezcla documentos de otro origen en las respuestas.
+    origen = models.CharField(max_length=10, choices=Origen.choices, default=Origen.REAL, db_index=True)
     fecha_indexacion = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -339,6 +424,16 @@ class ConsultaAsistente(models.Model):
     # auditarla sin depender de que esos documentos sigan existiendo tal
     # cual (el índice se reconstruye completo en cada "indexar_conocimiento").
     documentos_usados = models.JSONField(default=list, blank=True)
+    # Con qué se generó la respuesta, para documentarlo en la tesis:
+    # proveedor de LLM ("ollama"/"anthropic") y modelo que informó el propio
+    # servicio al responder. Si el proveedor falló (fallo_llm=True), son el
+    # proveedor y el modelo configurados que se intentaron, y la respuesta
+    # guardada es el respaldo con los datos sin redactar. Vacíos si no hubo
+    # llamada al LLM (p. ej. índice vacío) o en consultas anteriores a
+    # estos campos.
+    proveedor_llm = models.CharField(max_length=30, blank=True, db_index=True)
+    modelo_llm = models.CharField(max_length=100, blank=True)
+    fallo_llm = models.BooleanField(default=False)
     fecha = models.DateTimeField(auto_now_add=True, db_index=True)
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,

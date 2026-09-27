@@ -17,10 +17,12 @@ from ._comunes import _origen_o_defecto, _variacion_periodo, resolver_rango_peri
 from .anomalias import _anomalias_no_revisadas
 
 
-def _recomendaciones_urgentes(origen):
+def _recomendaciones_urgentes():
     """Productos en estado crítico o para reponer, del último lote generado
     por "generar_recomendaciones", ordenados por urgencia (crítico primero)
-    y luego por cantidad sugerida descendente."""
+    y luego por cantidad sugerida descendente. Sin filtro de origen: las
+    recomendaciones cubren el catálogo completo, que es uno solo (filtrar
+    por Producto.origen dejaba solo los 14 productos cargados como "real")."""
     ultima_fecha_generacion = (
         Recomendacion.objects.order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
     )
@@ -37,21 +39,20 @@ def _recomendaciones_urgentes(origen):
         fecha_generacion=ultima_fecha_generacion,
         estado__in=[Recomendacion.Estado.CRITICO, Recomendacion.Estado.REPONER],
     )
-    if origen:
-        qs = qs.filter(producto__origen=origen)
     return list(
         qs.select_related('producto').annotate(orden_urgencia=orden_urgencia)
         .order_by('orden_urgencia', '-cantidad_sugerida')
     )
 
 
-def _salud_catalogo(origen):
+def _salud_catalogo():
     """Cuántos productos del último lote de recomendaciones están en cada
     estado (crítico/reponer/normal/exceso), en ese orden fijo (de más a
     menos urgente), para la barra apilada "salud del catálogo" del
     dashboard. Mismos estados y mismos colores que la lista de
     recomendaciones, solo que aquí se ve la proporción del catálogo
-    completo en vez de la lista uno por uno."""
+    completo en vez de la lista uno por uno. Sin filtro de origen, igual
+    que _recomendaciones_urgentes."""
     ultima_fecha_generacion = (
         Recomendacion.objects.order_by('-fecha_generacion').values_list('fecha_generacion', flat=True).first()
     )
@@ -59,8 +60,6 @@ def _salud_catalogo(origen):
         return None
 
     qs = Recomendacion.objects.filter(fecha_generacion=ultima_fecha_generacion)
-    if origen:
-        qs = qs.filter(producto__origen=origen)
 
     conteos = {estado: 0 for estado in Recomendacion.Estado.values}
     for fila in qs.values('estado').annotate(total=Count('id')):
@@ -91,9 +90,7 @@ def _anomalias_por_severidad(origen):
     del dashboard (antes era además una barra apilada aparte, que duplicaba
     la misma información que ya muestra la columna "Severidad" de la
     tabla)."""
-    qs = Anomalia.objects.filter(revisada=False)
-    if origen:
-        qs = qs.filter(producto__origen=origen)
+    qs = Anomalia.objects.del_origen(origen).filter(revisada=False)
 
     conteos = {severidad: 0 for severidad in Anomalia.Severidad.values}
     for fila in qs.values('severidad').annotate(total=Count('id')):
@@ -111,23 +108,33 @@ def _anomalias_por_severidad(origen):
 
 
 def _productos_con_prediccion(origen):
-    """Productos que tienen al menos una Prediccion guardada, para el
-    selector del gráfico de predicción de demanda del dashboard."""
-    qs = Producto.objects.filter(predicciones__isnull=False)
+    """Productos con predicción en el lote vigente (Prediccion
+    .fecha_ultimo_lote), para el selector del gráfico de predicción de
+    demanda del dashboard. Los que solo tienen predicciones de corridas
+    anteriores (p. ej. de una categoría que quedó fuera del modelo) no
+    aparecen: no tienen pronóstico vigente."""
+    ultimo_lote = Prediccion.fecha_ultimo_lote()
+    if ultimo_lote is None:
+        return []
+    qs = Producto.objects.filter(predicciones__fecha_generacion=ultimo_lote)
     if origen:
         qs = qs.filter(origen=origen)
     return list(qs.distinct().order_by('nombre'))
 
 
 def _ultima_prediccion_por_producto(productos_ids):
-    """{producto_id: fecha_generacion de su lote más reciente}, para no
-    mezclar corridas de "predecir_demanda" distintas al sumar por
-    categoría (cada producto aporta solo su propio último lote)."""
-    return dict(
-        Prediccion.objects.filter(producto_id__in=productos_ids)
-        .values('producto_id').annotate(ultima=Max('fecha_generacion'))
-        .values_list('producto_id', 'ultima')
-    )
+    """{producto_id: fecha_generacion del lote vigente} para los productos
+    que tienen predicción en ese lote, para no mezclar corridas de
+    "predecir_demanda" distintas al sumar por categoría. Es el mismo lote
+    que usa el motor de decisiones: un producto que no está en él no tiene
+    pronóstico, aunque conserve predicciones anteriores."""
+    ultimo_lote = Prediccion.fecha_ultimo_lote()
+    if ultimo_lote is None:
+        return {}
+    ids = Prediccion.objects.filter(
+        producto_id__in=productos_ids, fecha_generacion=ultimo_lote,
+    ).values_list('producto_id', flat=True).distinct()
+    return {producto_id: ultimo_lote for producto_id in ids}
 
 
 def _categorias_con_prediccion(origen):
@@ -211,7 +218,9 @@ def grafico_prediccion_demanda(origen, tipo, valor):
         productos_ids = [producto.pk]
         etiqueta = f'{producto.codigo} — {producto.nombre} {producto.presentacion}'.strip()
     else:
-        qs = Producto.objects.filter(categoria=valor, predicciones__isnull=False)
+        qs = Producto.objects.filter(
+            categoria=valor, predicciones__fecha_generacion=Prediccion.fecha_ultimo_lote(),
+        )
         if origen:
             qs = qs.filter(origen=origen)
         productos_ids = list(qs.distinct().values_list('pk', flat=True))
@@ -306,7 +315,7 @@ def dashboard(request):
     # ordenados por urgencia/severidad) y enlaza a la pantalla con el
     # listado paginado completo para el resto.
     LIMITE_PREVIA = 8
-    recomendaciones_todas = _recomendaciones_urgentes(origen)
+    recomendaciones_todas = _recomendaciones_urgentes()
     anomalias_todas = _anomalias_no_revisadas(origen)
 
     # Recomendación destacada del dashboard: la más urgente que todavía no
@@ -337,7 +346,7 @@ def dashboard(request):
         'anomalias': anomalias_todas[:LIMITE_PREVIA],
         'anomalias_total': len(anomalias_todas),
         'anomalias_severidad': _anomalias_por_severidad(origen),
-        'salud_catalogo': _salud_catalogo(origen),
+        'salud_catalogo': _salud_catalogo(),
         'categorias_prediccion': categorias_prediccion,
         'productos_prediccion': productos_prediccion,
         'tipo_grafico': tipo_grafico,
