@@ -196,6 +196,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `detectar_anomalias`     | Corre los detectores de anomalías de control de existencias y guarda registros `Anomalia`.                          | `--origen` (opcional)                                                         |
 | `entrenar_base`          | Fase 1: preentrena el motor de predicción con el dataset externo de Kaggle.                                          | `--archivo` (por defecto `datos/train.csv`), `--dias-test` (30)               |
 | `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. Falla si `--dias-test` dejaría menos de 14 días para entrenar. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`) |
+| `optimizar_modelo`       | Busca hiperparámetros del ajuste con validación cruzada temporal, prueba variantes de la fase base y de variables, y compara todo sobre el mismo test. **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/optimizacion/` (JSON y CSV). Ver [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción). | `--origen` (`real`), `--nivel` (`categoria`), `--dias-test` (7), `--pliegues` (4), `--iteraciones` (100), `--quitar` (3), `--semilla` (42), `--semillas-ruido` (10), `--archivo-externo` |
 | `predecir_demanda`       | Genera predicciones de demanda diaria con el modelo ajustado activo (o el base si aún no hay ajustado).              | `--dias` (30), `--origen` (opcional)                                          |
 | `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas y calcula MAE, RMSE, SMAPE y R².                                 | —                                                                              |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
@@ -269,6 +270,116 @@ almacenamiento y PD pérdidas por desabastecimiento.
   periodo" como fila de `CostoAlmacenamiento` (o restarla al construir el
   monto de almacenamiento), no simplemente sumar las dos fuentes.
 
+## Optimización del modelo de predicción
+
+Comando `optimizar_modelo` (`inventario/ml/optimizacion.py`). Se corrió el
+01/10/2026 sobre los datos reales de agosto 2026, nivel categoría
+(accesorio, esmalte, látex), con la misma división que el modelo vigente
+(#5): **24 días de ajuste (01/08–24/08) y 7 de prueba (25/08–31/08)**, en
+orden cronológico. Se puede repetir tal cual cuando haya más histórico
+(`python manage.py optimizar_modelo`, ~2 minutos).
+
+### Qué se probó
+
+1. **Hiperparámetros de la fase de ajuste** — búsqueda aleatoria de 100
+   candidatos (`ParameterSampler`, equivalente a `RandomizedSearchCV`) más la
+   configuración actual, sobre `n_estimators`, `learning_rate`,
+   `max_depth`, `min_child_weight`, `subsample`, `colsample_bytree` y
+   `reg_lambda` (espacio en `ESPACIO_AJUSTE`). Se eligió por validación
+   cruzada temporal (`TimeSeriesSplit`, 4 pliegues) **solo sobre los 24 días
+   de ajuste**: pliegues que entrenan con 8, 12, 16 y 20 días y validan con
+   los 4 días siguientes. Los pliegues se arman por fecha, no por fila, para
+   que las tres categorías de un mismo día caigan siempre juntas.
+2. **Fase base** — 8 combinaciones adicionales de árboles (150, 300, 600) y
+   learning rate (0.02, 0.05, 0.1) en el preentrenamiento con Kaggle, cada
+   una ajustada con los hiperparámetros de ajuste actuales.
+3. **Variables**, cada alternativa por separado: (a) + rezago de 1 día y
+   media móvil de 3 días; (b) + indicador de inicio y de fin de mes (5
+   primeros / 5 últimos días); (c) − las 3 variables de menor importancia
+   por ganancia en el modelo ajustado actual (`dia_mes`, `rezago_30`,
+   `std_movil_30`). Como las variables deben ser idénticas entre
+   preentrenamiento y ajuste, **cada variante reentrena también la fase
+   base** con ese mismo conjunto.
+4. **Combinada** — la mejor base y el mejor conjunto de variables *según la
+   validación cruzada* (nunca según el test), con su propia búsqueda del
+   ajuste.
+
+Garantías de validez: el test no participa de ninguna elección (ni de la
+búsqueda, ni de la elección de base/variables, ni del cálculo de
+importancias); un test automatizado altera por completo la demanda de los
+días de prueba y verifica que nada de lo elegido cambie
+(`inventario/tests/test_optimizacion.py`). No se usa shuffle en ningún paso.
+
+Columnas de la tabla: **R² CV** = R² fuera de pliegue de la validación
+cruzada (días de ajuste); **MAE/RMSE/SMAPE/R²** = test a un paso (las
+variables de cada día usan la demanda real de días anteriores, igual que
+`entrenar_ajustado`); **R² rec.** = test pronosticado de forma recursiva
+desde el 24/08, sin ver ninguna demanda real del periodo de prueba (así usa
+el modelo `predecir_demanda`).
+
+### Resultados (mismo test de 21 filas, ordenados por R²)
+
+| # | Grupo | Configuración | R² CV | MAE | RMSE | SMAPE | R² | R² rec. |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | 2. Base | Base 300 árboles, lr 0.02 | 0.256 | 11.79 | 13.64 | 61.7% | **0.4258** | 0.4504 |
+| 2 | 2. Base | Base 150 árboles, lr 0.05 | 0.256 | 12.04 | 13.72 | 62.1% | 0.4193 | 0.4440 |
+| 3 | Referencia | Modelo base sin ajuste | 0.224 | 11.82 | 13.74 | 61.1% | 0.4175 | 0.4157 |
+| 4 | 2. Base | Base 150 árboles, lr 0.1 | 0.246 | 12.00 | 13.77 | 62.2% | 0.4151 | 0.4482 |
+| 5 | Referencia | **Configuración actual (vigente, #5)** | 0.255 | 11.89 | 13.93 | 61.0% | **0.4013** | 0.4542 |
+| 6 | 2. Base | Base 150 árboles, lr 0.02 | 0.248 | 12.39 | 14.00 | 62.6% | 0.3950 | 0.4225 |
+| 7 | 3. Variables | + inicio y fin de mes | 0.219 | 12.18 | 14.10 | 62.0% | 0.3865 | 0.4161 |
+| 8 | 2. Base | Base 600 árboles, lr 0.05 | 0.255 | 11.97 | 14.11 | 60.6% | 0.3860 | 0.4321 |
+| 9 | 3. Variables | − dia_mes, rezago_30, std_movil_30 | 0.247 | 11.94 | 14.15 | 61.8% | 0.3819 | 0.3630 |
+| 10 | 2. Base | Base 600 árboles, lr 0.02 | 0.233 | 12.19 | 14.19 | 61.8% | 0.3785 | 0.4191 |
+| 11 | 3. Variables | + rezago_1 y media_movil_3 | 0.194 | 12.19 | 14.26 | 62.4% | 0.3724 | 0.4017 |
+| 12 | 2. Base | Base 300 árboles, lr 0.1 | 0.264 | 12.44 | 14.48 | 62.9% | 0.3530 | 0.3776 |
+| 13 | Referencia | Solo datos internos (sin transferencia) | 0.065 | 11.76 | 14.69 | 60.2% | 0.3340 | 0.4775 |
+| 14 | 2. Base | Base 600 árboles, lr 0.1 | 0.262 | 12.42 | 14.97 | 61.9% | 0.3083 | 0.3216 |
+| 15 | 4. Combinada | Base 300/lr 0.1 + variables actuales + ajuste por CV | 0.336 | 12.13 | 15.92 | 60.9% | 0.2177 | 0.5865 |
+| 16 | 1. Ajuste | Ajuste optimizado por CV | 0.323 | 14.51 | 17.70 | 67.5% | 0.0332 | 0.0985 |
+| 17 | Referencia | Línea base ingenua (día anterior) | −0.452 | 14.90 | 18.06 | 88.9% | −0.0063 | 0.2096 |
+
+Hiperparámetros elegidos por la validación cruzada:
+
+- Ajuste optimizado (fila 16): `n_estimators=400, learning_rate=0.02,
+  max_depth=8, min_child_weight=3, subsample=1.0, colsample_bytree=0.8,
+  reg_lambda=10` (actual: `50, 0.01, 6, 1, 0.8, 0.8, 1`).
+- Combinada (fila 15): base `300 árboles, lr 0.1`; ajuste
+  `n_estimators=25, learning_rate=0.2, max_depth=2, min_child_weight=1,
+  subsample=0.5, colsample_bytree=0.8, reg_lambda=0.5`.
+
+**Ruido por semilla.** La configuración actual repetida con 10 semillas
+(0–9; solo cambia el azar de `subsample`/`colsample_bytree` en ambas
+fases): R² test **0.374 ± 0.019** (rango 0.340–0.398), R² rec. 0.417 ±
+0.017, R² CV 0.236 ± 0.011. El 0.4013 reportado por el modelo vigente
+(semilla 42) queda por encima de las 10 repeticiones.
+
+### Interpretación
+
+- **El techo de R² con una evaluación válida está en ~0.40.** La mejor fila
+  (0.4258, base de 300 árboles con lr 0.02) supera a la vigente en 0.025,
+  que es del orden de la variación por semilla (desv. 0.019, rango 0.058).
+  Ninguna mejora es atribuible a la configuración.
+- **Optimizar por validación cruzada empeoró el test.** La búsqueda del
+  ajuste subió el R² CV de 0.255 a 0.323, pero en test cayó a 0.033; la
+  combinada, a 0.218. Entre las 14 configuraciones candidatas, el orden por
+  R² CV y por R² test no se corresponde (Spearman −0.37, p = 0.19): con
+  pliegues de validación de 4 días × 3 categorías (12 filas), la búsqueda
+  se ajusta al ruido de esos días. Elegir en cambio la fila de mayor R² en
+  test sería ajustar al test.
+- **Ninguna variante de variables mejora**: ni el rezago de 1 día ni el
+  inicio/fin de mes aportan, y quitar las de menor importancia tampoco.
+- **La transferencia sigue aportando frente a entrenar solo con datos
+  internos** en la validación cruzada (0.255 vs. 0.065) y en el test a un
+  paso (0.401 vs. 0.334), aunque no en el recursivo (0.454 vs. 0.478),
+  cuya diferencia también cae dentro del ruido. El ajuste con 24 días casi
+  no mueve al modelo base (0.401 vs. 0.418 en test; 0.255 vs. 0.224 en CV).
+- **Recomendación** (el comando no activa nada; la decisión es del
+  autor): mantener la configuración actual. Con un mes de histórico, lo
+  que limita el R² son los datos, no los hiperparámetros. Volver a correr
+  `optimizar_modelo` cuando haya al menos 90 días; con más días de
+  validación, la búsqueda por CV deja de ajustarse al ruido.
+
 ## Limitaciones
 
 - El histórico disponible es de 31 días; la literatura recomienda al menos 90 para series temporales.
@@ -279,7 +390,9 @@ almacenamiento y PD pérdidas por desabastecimiento.
   entrenamiento (`MIN_DIAS_ENTRENAMIENTO`), así que un `--dias-test` mayor
   simplemente no corre con este histórico. Con tan pocos días en cualquiera
   de los dos conjuntos, las métricas van a variar bastante entre
-  entrenamientos sucesivos.
+  entrenamientos sucesivos. Medido: con solo cambiar la semilla, el R² en
+  test de la configuración vigente varía entre 0.340 y 0.398 (ver
+  [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción)).
 - El pronóstico por categoría no captura diferencias finas entre productos de una misma categoría.
 - Tres categorías quedan fuera del modelo por volumen insuficiente.
 - El detector de movimientos atípicos requiere al menos cinco movimientos previos por producto.

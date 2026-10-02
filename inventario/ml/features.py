@@ -18,6 +18,17 @@ COLUMNAS_FEATURES = [
 
 COLUMNAS_SALIDA = ['fecha', 'serie_id', 'cantidad'] + COLUMNAS_FEATURES
 
+# Variables candidatas que solo usa el comando optimizar_modelo para probar
+# variantes del conjunto de variables. NO forman parte del modelo vigente:
+# el modelo activo y predecir_demanda siguen usando COLUMNAS_FEATURES. Igual
+# que las demás, se derivan solo de fecha/serie/cantidad (existen también en
+# el dataset externo).
+COLUMNAS_EXPERIMENTALES = ['rezago_1', 'media_movil_3', 'es_inicio_mes', 'es_fin_mes']
+
+# Días que cuentan como "inicio" (1..N) y "fin" (últimos N) de mes para
+# es_inicio_mes / es_fin_mes.
+DIAS_BORDE_MES = 5
+
 
 def _densificar(df):
     """Reindexa cada serie al rango diario completo entre su primera y su
@@ -36,10 +47,11 @@ def _densificar(df):
     return pd.concat(piezas, ignore_index=True)
 
 
-def construir_features(df):
+def construir_features(df, experimentales=False):
     """Recibe un DataFrame con columnas 'fecha', 'serie_id' y 'cantidad'
     (una fila por combinación fecha/serie; puede venir con huecos) y
-    devuelve el dataset de entrenamiento con COLUMNAS_SALIDA.
+    devuelve el dataset de entrenamiento con COLUMNAS_SALIDA (más
+    COLUMNAS_EXPERIMENTALES si experimentales=True).
 
     Todas las variables derivadas (rezagos y medias/desviación móviles) se
     calculan usando únicamente información de días ANTERIORES al día de la
@@ -75,7 +87,18 @@ def construir_features(df):
         lambda s: s.shift(1).rolling(window=30, min_periods=1).std()
     )
 
-    return df[COLUMNAS_SALIDA]
+    if not experimentales:
+        return df[COLUMNAS_SALIDA]
+
+    df['rezago_1'] = cantidad_por_serie.shift(1)
+    df['media_movil_3'] = cantidad_por_serie.transform(
+        lambda s: s.shift(1).rolling(window=3, min_periods=1).mean()
+    )
+    df['es_inicio_mes'] = (df['dia_mes'] <= DIAS_BORDE_MES).astype(int)
+    df['es_fin_mes'] = (
+        df['dia_mes'] > df['fecha'].dt.days_in_month - DIAS_BORDE_MES
+    ).astype(int)
+    return df[COLUMNAS_SALIDA + COLUMNAS_EXPERIMENTALES]
 
 
 def dividir_temporal(df, dias_test=30):

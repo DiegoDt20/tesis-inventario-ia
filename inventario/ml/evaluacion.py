@@ -55,10 +55,10 @@ def calcular_metricas(y_real, y_predicho):
     }
 
 
-def predecir_con_modelo(modelo, df_features):
+def predecir_con_modelo(modelo, df_features, columnas=COLUMNAS_FEATURES):
     """Genera predicciones de un XGBRegressor sobre un dataset con las
-    columnas de COLUMNAS_FEATURES."""
-    return modelo.predict(df_features[COLUMNAS_FEATURES])
+    columnas indicadas (por defecto COLUMNAS_FEATURES)."""
+    return modelo.predict(df_features[columnas])
 
 
 def linea_base_ingenua(train, test):

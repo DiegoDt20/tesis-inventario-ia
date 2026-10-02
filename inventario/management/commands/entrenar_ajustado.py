@@ -9,7 +9,11 @@ from inventario.ml.carga_interna import (
     leer_demanda_interna_por_categoria,
     seleccionar_categorias_aptas,
 )
-from inventario.ml.entrenamiento import entrenar_fase_ajuste, guardar_modelo
+from inventario.ml.entrenamiento import (
+    MIN_DIAS_ENTRENAMIENTO,
+    entrenar_fase_ajuste,
+    guardar_modelo,
+)
 from inventario.ml.evaluacion import comparar_modelos
 from inventario.models import ModeloEntrenado, NivelPrediccion, Origen
 
@@ -18,13 +22,6 @@ ETIQUETAS_MODELOS = {
     'solo_interno': 'Solo datos internos',
     'ajustado': 'Preentrenado + ajuste',
 }
-
-# Con menos días de entrenamiento que esto, el ajuste (y sobre todo la
-# comparación contra la línea base y contra "solo datos internos") deja de
-# ser confiable: XGBoost prácticamente memoriza esos pocos días en vez de
-# aprender un patrón. No es un número mágico exacto, pero por debajo de dos
-# semanas no hay ni un ciclo semanal completo que aprender.
-MIN_DIAS_ENTRENAMIENTO = 14
 
 
 class Command(BaseCommand):

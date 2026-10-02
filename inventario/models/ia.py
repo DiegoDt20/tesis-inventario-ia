@@ -68,7 +68,7 @@ class ModeloEntrenado(models.Model):
     # campos existieran. Se muestran en el dashboard porque un conjunto de
     # prueba grande sobre un histórico corto puede dejar muy pocos días para
     # entrenar y volver la comparación de los tres modelos poco confiable
-    # (ver MIN_DIAS_ENTRENAMIENTO en el comando entrenar_ajustado).
+    # (ver MIN_DIAS_ENTRENAMIENTO en inventario/ml/entrenamiento.py).
     dias_entrenamiento = models.IntegerField(null=True, blank=True)
     dias_prueba = models.IntegerField(null=True, blank=True)
     ruta_archivo = models.CharField(max_length=500)

@@ -149,6 +149,18 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
   - `evaluacion.py` — MAE, RMSE, MAPE, R²; compara línea base ingenua,
     modelo solo-interno y modelo preentrenado+ajustado sobre el mismo test
     interno, para demostrar si la transferencia aporta valor.
+  - `optimizacion.py` + comando `optimizar_modelo`: búsqueda de
+    hiperparámetros del ajuste con `TimeSeriesSplit` por fecha SOLO sobre
+    los días de entrenamiento, variantes de la fase base y de variables
+    (cada variante de variables reentrena también la base con esas mismas
+    columnas), todo medido sobre el mismo test. Nunca activa ni registra
+    modelos; el reporte va a `artefactos/optimizacion/`. Resultado
+    (01/10/2026, 24/7 días): ninguna configuración supera a la vigente más
+    allá del ruido por semilla (R² test 0.374 ± 0.019); no se activó
+    nada (la decisión de cambiar el modelo la toma el usuario). Detalle en la sección "Optimización del modelo de predicción"
+    del README. Las variables de `COLUMNAS_EXPERIMENTALES`
+    (`construir_features(..., experimentales=True)`) no son del modelo
+    vigente: `predecir_demanda` sigue usando `COLUMNAS_FEATURES`.
 - Modelos `ModeloEntrenado` (métricas, hiperparámetros, fase, archivo,
   `activo`, y para la fase "ajustado" también `origen_datos_internos`,
   `dias_entrenamiento` y `dias_prueba`) y `Prediccion` (producto, fecha

@@ -21,6 +21,14 @@ from .features import COLUMNAS_FEATURES, construir_features, dividir_temporal
 
 DIR_MODELOS = Path('artefactos/modelos_ml')
 
+# Con menos días de entrenamiento que esto, el ajuste (y sobre todo la
+# comparación contra la línea base y contra "solo datos internos") deja de
+# ser confiable: XGBoost prácticamente memoriza esos pocos días en vez de
+# aprender un patrón. No es un número mágico exacto, pero por debajo de dos
+# semanas no hay ni un ciclo semanal completo que aprender. Lo usan
+# entrenar_ajustado y optimizar_modelo.
+MIN_DIAS_ENTRENAMIENTO = 14
+
 # Fase 1: entrena desde cero, con más árboles y un learning rate normal.
 HIPERPARAMETROS_BASE = {
     'n_estimators': 300,
@@ -43,12 +51,12 @@ HIPERPARAMETROS_AJUSTE = {
 }
 
 
-def entrenar_modelo(df_train, hiperparametros, xgb_model=None):
+def entrenar_modelo(df_train, hiperparametros, xgb_model=None, columnas=COLUMNAS_FEATURES):
     """Entrena un XGBRegressor sobre df_train (ya con las columnas de
-    COLUMNAS_FEATURES y 'cantidad' como objetivo). Si se pasa xgb_model
-    (ruta a un modelo ya entrenado), continúa el entrenamiento a partir de
-    esos árboles en vez de empezar desde cero."""
-    X = df_train[COLUMNAS_FEATURES]
+    `columnas` y 'cantidad' como objetivo). Si se pasa xgb_model (ruta o
+    Booster de un modelo ya entrenado con esas mismas columnas), continúa el
+    entrenamiento a partir de esos árboles en vez de empezar desde cero."""
+    X = df_train[columnas]
     y = df_train['cantidad']
     modelo = xgb.XGBRegressor(**hiperparametros)
     modelo.fit(X, y, xgb_model=xgb_model)
