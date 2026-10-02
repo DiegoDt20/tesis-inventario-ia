@@ -97,6 +97,18 @@ def _lead_time_real(producto):
     return sum(dias_por_linea) / len(dias_por_linea)
 
 
+def lead_time_producto(producto):
+    """Lead time (días) que usa el motor para este producto: el promedio
+    real de sus compras recibidas si hay MIN_COMPRAS_PARA_LEAD_TIME_REAL o
+    más; si no, el configurado en la ficha (producto.lead_time_dias).
+    Devuelve (lead_time, es_real). Lo usan el stock de seguridad y la
+    ventana de evaluación del pronóstico (evaluar_predicciones)."""
+    lead_time_real = _lead_time_real(producto)
+    if lead_time_real is not None:
+        return lead_time_real, True
+    return float(producto.lead_time_dias), False
+
+
 def _pedidos_en_transito(producto):
     """Unidades ya pedidas a proveedores pero aún no recibidas (compras que
     no están canceladas)."""
@@ -182,9 +194,7 @@ def calcular_recomendacion(
         ultima_generacion = Prediccion.fecha_ultimo_lote()
     desviacion_demanda = float(estadisticas['desviaciones'].get(producto.pk, 0.0))
 
-    lead_time_real = _lead_time_real(producto)
-    lead_time_es_real = lead_time_real is not None
-    lead_time_usado = lead_time_real if lead_time_es_real else float(producto.lead_time_dias)
+    lead_time_usado, lead_time_es_real = lead_time_producto(producto)
 
     ss = stock_seguridad(desviacion_demanda, lead_time_usado, nivel_servicio_objetivo)
     en_transito = _pedidos_en_transito(producto)

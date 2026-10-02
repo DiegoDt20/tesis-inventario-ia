@@ -199,7 +199,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. Falla si `--dias-test` dejaría menos de 14 días para entrenar. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`) |
 | `optimizar_modelo`       | Busca hiperparámetros del ajuste con validación cruzada temporal, prueba variantes de la fase base y de variables, y compara todo sobre el mismo test. **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/optimizacion/` (JSON y CSV). Ver [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción). | `--origen` (`real`), `--nivel` (`categoria`), `--dias-test` (7), `--pliegues` (4), `--iteraciones` (100), `--quitar` (3), `--semilla` (42), `--semillas-ruido` (10), `--archivo-externo` |
 | `predecir_demanda`       | Genera predicciones de demanda diaria con el modelo ajustado activo (o el base si aún no hay ajustado).              | `--dias` (30), `--origen` (opcional)                                          |
-| `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas (solo con pedidos del origen y hasta el último día con pedidos de ese origen) y calcula MAE, RMSE, SMAPE y R². Además evalúa la exactitud del modelo ajustado vigente sobre su test temporal contra tres líneas base. **No activa ni registra ningún modelo**; guarda la corrida en el vigente y en `artefactos/evaluacion/`. Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `--origen` (`real`) |
+| `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas (solo con pedidos del origen y hasta el último día con pedidos de ese origen) y calcula MAE, RMSE, SMAPE y R². Además evalúa la exactitud del modelo ajustado vigente contra tres líneas base, en horizonte diario y de ventana de lead time, con validación de origen móvil (o la división única de antes con `--no-walk-forward`). **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/evaluacion/` (y la división única diaria, también en el vigente). Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `--origen` (`real`), `--horizonte diario\|ventana\|ambos` (`ambos`), `--walk-forward`/`--no-walk-forward` (activado) |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
 | `indexar_conocimiento`   | Regenera el índice del asistente conversacional (borra y reconstruye `DocumentoIndexado`).                           | —                                                                              |
 | `recalcular_stock`       | Recalcula `stock_actual` de todos los productos a partir del historial de `Movimiento`.                              | —                                                                              |
@@ -387,8 +387,11 @@ Comando `evaluar_predicciones` (funciones en `inventario/ml/evaluacion.py`).
 MAE, RMSE, SMAPE y R² no permiten afirmar nada sobre *exactitud* en el
 sentido que se usa en logística, así que se agregan las métricas estándar
 de gestión de inventario y tres líneas base contra las cuales compararlas.
-Las definiciones y la tolerancia se fijaron **antes** de correr la
-evaluación y no se ajustaron después de ver el resultado.
+Las definiciones, la tolerancia, el horizonte y los orígenes se fijaron
+**antes** de correr la evaluación y no se ajustaron después de ver el
+resultado. Por defecto la evaluación es de origen móvil y en dos horizontes
+(diario y ventana de lead time); `--no-walk-forward` vuelve a la división
+única para reproducir el resultado anterior.
 
 ### Métricas
 
@@ -396,8 +399,9 @@ evaluación y no se ajustaron después de ver el resultado.
 |---|---|---|
 | **WAPE** | Σ \|real − pronóstico\| / Σ real | Tamaño del error relativo al volumen vendido. |
 | **Exactitud** | 1 − WAPE | Lo mismo, expresado como acierto. Puede ser negativa (el error supera a la demanda, típico en baja rotación) y se reporta así, sin truncar a 0. |
-| **Acierto dentro de tolerancia** | % de días con \|real − pronóstico\| / max(real, 1) ≤ t | Con qué frecuencia el pronóstico de un día cae dentro del margen aceptable. El max(real, 1) evita dividir por cero los días sin demanda. |
-| **R² intra-categoría** | R² calculado dentro de cada categoría por separado | Cuánto del movimiento día a día de cada categoría explica el pronóstico. |
+| **Acierto dentro de tolerancia** | % de filas (días o ventanas) con \|real − pronóstico\| / max(real, 1) ≤ t | Con qué frecuencia el pronóstico cae dentro del margen aceptable. El max(real, 1) evita dividir por cero cuando no hubo demanda. |
+| **R² intra-categoría** | R² calculado dentro de cada categoría por separado | Cuánto del movimiento de cada categoría (de día a día, o de ventana a ventana) explica el pronóstico. |
+| **Dispersión entre orígenes** | Desviación estándar muestral del WAPE total de cada origen (uno por origen, no por fila) | Cuánto depende el resultado de qué semana se evalúa: 30% ± 4 no es lo mismo que 30% ± 18. |
 | **R² global** | R² sobre todas las filas juntas (el que ya se reportaba) | Incluye la diferencia de nivel entre categorías (esmalte ~65 u/día, látex ~10, accesorios ~7): esa varianza entre categorías domina y lo infla. Se mantiene para no romper lo ya reportado. |
 
 - El WAPE **total** es el WAPE agregado sobre todas las filas (Σ \|error\| /
@@ -439,42 +443,206 @@ ninguno reemplaza al otro: se reportan los dos.
   tolerancia. Se omite hasta que haya lotes de compra reales, o hasta que se
   defina una conversión del SS antes de mirar resultados.
 
+### Horizonte: la ventana de lead time
+
+El pronóstico alimenta el punto de reorden, ROP = d̄·L + SS: lo que el motor
+necesita saber es cuánta demanda habrá **durante los L días** que tarda en
+llegar el pedido, no cuánto se vende un martes concreto. Por eso se evalúan
+dos horizontes por separado:
+
+- **Diario (H = 1):** cada día por separado, como antes. Se mantiene para
+  comparar.
+- **Ventana de lead time (H = L):** se suma la demanda pronosticada de los L
+  días y se compara contra la suma real de esos mismos días. Es el horizonte
+  que importa para la decisión. Dentro de una ventana, un día sobrestimado y
+  otro subestimado se compensan, igual que en el stock real durante el lead
+  time.
+
+L se lee del sistema y no se escribe a mano. Es la **mediana, redondeada
+hacia arriba, del lead time que usa el motor de decisiones para el stock de
+seguridad** (`lead_time_producto` en `inventario/decisiones/motor.py`): el
+promedio real de las compras recibidas si hay al menos 3, y si no, el
+`lead_time_dias` de la ficha. Se toman los productos activos de las
+categorías evaluadas. Con los datos actuales no hay compras registradas, así
+que sale de la ficha: 255 productos con 7 días y 1 con 10, **L = 7**. Se
+redondea hacia arriba para que la ventana cubra el lead time completo.
+
+### Validación de origen móvil (walk-forward)
+
+Con 31 días de histórico, una única división (ajuste 01–24/08, prueba
+25–31/08: 21 filas) depende de qué semana cayó en la prueba. Diferencias de
+1 o 2 puntos de WAPE no son concluyentes. La evaluación sobre un origen de
+pronóstico móvil es el método estándar para series cortas (Tashman, L. J.
+(2000), "Out-of-sample tests of forecasting accuracy: an analysis and
+review", *International Journal of Forecasting*, 16(4), 437–450; Hyndman,
+R. J. & Athanasopoulos, G., *Forecasting: Principles and Practice*, 3.ª
+ed., sección 5.10 "Time series cross-validation", evaluación sobre un
+origen de pronóstico móvil). Para cada origen t
+(`inventario/ml/walk_forward.py`):
+
+1. Se rehace el ajuste fino usando **solo los días 1..t**, con la
+   configuración del modelo vigente (#5) y sobre el modelo base
+   preentrenado con Kaggle. La base no se vuelve a entrenar.
+2. Se pronostican los días t+1..t+H **encadenando**: cada día pronosticado
+   (con piso en 0) alimenta los rezagos y medias móviles del siguiente,
+   como hace `predecir_demanda`. Nunca se usa la demanda real de los días
+   intermedios.
+3. Se compara contra la demanda real de esos días y se avanza t un día.
+
+El primer origen es el que deja `MIN_DIAS_ENTRENAMIENTO` = 14 días de
+ajuste (14/08). El último es el t con t+H = último día con datos. Con 31
+días quedan **17 orígenes en el horizonte diario** (14/08–30/08) y **11 en
+el de ventana** (14/08–24/08). Se parte por fecha: las tres categorías de
+un día van siempre juntas. Con menos de 5 orígenes el comando advierte que
+la métrica sigue siendo frágil. Sin ningún origen posible, falla con un
+mensaje en vez de dar un número.
+
+Hay dos garantías verificadas por tests (`inventario/tests/test_evaluacion.py`):
+
+- ningún día pronosticado entra en el ajuste de su origen;
+- poner 10.000 unidades en todos los días posteriores al origen, o alterar
+  un día intermedio de la ventana, no cambia ningún pronóstico de ese
+  origen.
+
+Al plantar una fuga a propósito, esos tests fallan.
+
+Las ventanas de orígenes consecutivos comparten 6 de sus 7 días, así que
+las 11 ventanas no son 11 muestras independientes. La dispersión entre
+orígenes describe cuánto cambia el resultado según la semana; no es un
+intervalo de confianza.
+
 ### Líneas base
 
-Las tres se evalúan sobre exactamente las mismas filas del test que el
-modelo, con las mismas métricas:
+Las tres se evalúan con el mismo procedimiento (mismos orígenes, mismo
+horizonte y mismas métricas que el modelo) y solo con la demanda real hasta
+el origen:
 
-1. **Media por categoría** de los días de entrenamiento, repetida para todos
-   los días del test (ningún día del test entra en su cálculo). Es la
-   referencia natural del R² intra-categoría.
-2. **Media móvil de 7 días** por categoría, encadenada día a día: el día t
-   se pronostica con la demanda real de t−7 a t−1, la misma información que
-   usan las variables de rezago y media móvil del modelo.
-3. **Último valor** (persistencia): la demanda del día anterior.
+1. **Media por categoría** de los días de ajuste de ese origen, repetida en
+   todo el horizonte. Es la referencia natural del R² intra-categoría.
+2. **Media móvil de 7 días** por categoría, encadenada: el primer día usa
+   los 7 días reales anteriores al origen; los siguientes incluyen sus
+   propios pronósticos en vez de la demanda real.
+3. **Último valor** (persistencia): la demanda del día del origen,
+   repetida.
 
 El modelo solo puede presentarse como aportando valor si supera a las tres
-en WAPE.
+en WAPE en el **horizonte de ventana**, que es el que importa para la
+decisión.
 
-### Resultados
+### Resultados con validación de origen móvil
 
-Corrida del 02/10/2026 (`artefactos/evaluacion/evaluacion_categoria_20261002_054829.json`):
-modelo ajustado vigente #5, datos reales de agosto 2026, nivel categoría.
-Misma división que su entrenamiento: 24 días de ajuste (01/08–24/08) y 7
-de prueba (25/08–31/08), 21 filas. Pronóstico a un paso. Las categorías
-base, solvente y temple no tienen pronóstico del modelo (menos de 15 días
-con venta; se gestionan solo con punto de reorden), así que no entran en la
-evaluación.
+Corrida del 02/10/2026
+(`artefactos/evaluacion/evaluacion_walkforward_20261002_060705.json`):
+configuración del modelo vigente #5 (ajuste `n_estimators=50,
+learning_rate=0.01, max_depth=6, subsample=0.8, colsample_bytree=0.8`)
+sobre el modelo base #1, datos reales de agosto 2026, nivel categoría. Las
+categorías base, solvente y temple no tienen pronóstico del modelo (menos
+de 15 días con venta; se gestionan solo con punto de reorden), así que no
+entran en la evaluación. "Filas" = orígenes × categorías. En las filas
+**Total**, la columna R² es el R² global; en las demás, el intra-categoría.
 
-Modelo vigente, por categoría:
+**Horizonte diario (H = 1): 17 orígenes, 51 días-categoría.**
 
-| Categoría | Días | Real | Pronosticado | MAE | WAPE | Exactitud | Acierto ±20% | R² intra |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| accesorio | 7 | 53 | 82.2 | 8.00 | 105.7% | −5.7% | 28.6% | −0.2777 |
-| esmalte | 7 | 237 | 290.2 | 16.95 | 50.1% | 49.9% | 14.3% | −0.3752 |
-| látex | 7 | 258 | 217.8 | 10.72 | 29.1% | 70.9% | 14.3% | −0.1374 |
-| **Total** | 21 | 548 | 590.2 | 11.89 | **45.6%** | **54.4%** | 19.0% | R² global 0.4013 |
+| Método | Categoría | Filas | Real | Pronosticado | MAE | RMSE | WAPE | Exactitud | Acierto ±20% | R² | Desv. WAPE entre orígenes |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Modelo vigente** | accesorio | 17 | 121 | 208.5 | 7.93 | 9.54 | 111.4% | −11.4% | 17.6% | −0.378 | ±24.5 pp |
+|  | esmalte | 17 | 666 | 695.7 | 18.94 | 22.33 | 48.3% | 51.7% | 17.6% | −0.124 | ±39.4 pp |
+|  | látex | 17 | 581 | 486.0 | 13.53 | 16.29 | 39.6% | 60.4% | 17.6% | −0.174 | ±13.9 pp |
+| | **Total** (R² global) | 51 | 1368 | 1390.2 | 13.46 | 16.88 | **50.2%** | **49.8%** | 17.6% | 0.357 | ±16.5 pp |
+| Media por categoría (entrenamiento) | accesorio | 17 | 121 | 146.4 | 7.24 | 8.52 | 101.7% | −1.7% | 23.5% | −0.100 | ±30.0 pp |
+|  | esmalte | 17 | 666 | 685.7 | 17.64 | 21.67 | 45.0% | 55.0% | 29.4% | −0.058 | ±39.1 pp |
+|  | látex | 17 | 581 | 430.0 | 14.04 | 17.69 | 41.1% | 58.9% | 29.4% | −0.384 | ±17.7 pp |
+| | **Total** (R² global) | 51 | 1368 | 1262.1 | 12.98 | 16.88 | **48.4%** | **51.6%** | 27.5% | 0.358 | ±22.5 pp |
+| Media móvil 7 días | accesorio | 17 | 121 | 93.0 | 6.94 | 9.04 | 97.5% | 2.5% | 11.8% | −0.238 | ±29.1 pp |
+|  | esmalte | 17 | 666 | 687.7 | 18.76 | 22.10 | 47.9% | 52.1% | 5.9% | −0.100 | ±34.5 pp |
+|  | látex | 17 | 581 | 516.1 | 13.11 | 16.60 | 38.4% | 61.6% | 35.3% | −0.219 | ±20.4 pp |
+| | **Total** (R² global) | 51 | 1368 | 1296.9 | 12.94 | 16.79 | **48.2%** | **51.8%** | 17.6% | 0.365 | ±20.9 pp |
+| Último valor (día anterior) | accesorio | 17 | 121 | 111.0 | 10.35 | 13.19 | 145.5% | −45.5% | 23.5% | −1.637 | ±63.9 pp |
+|  | esmalte | 17 | 666 | 708.0 | 24.94 | 30.68 | 63.7% | 36.3% | 17.6% | −1.122 | ±62.1 pp |
+|  | látex | 17 | 581 | 566.0 | 17.35 | 21.57 | 50.8% | 49.2% | 17.6% | −1.059 | ±48.7 pp |
+| | **Total** (R² global) | 51 | 1368 | 1385.0 | 17.55 | 22.96 | **65.4%** | **34.6%** | 19.6% | −0.188 | ±35.3 pp |
 
-Modelo y líneas base sobre el mismo test:
+| Método | WAPE medio por origen | Desv. | Mín. | Máx. | Orígenes |
+|---|---:|---:|---:|---:|---:|
+| **Modelo vigente** | 51.2% | ±16.5 pp | 20.3% | 80.0% | 17 |
+| Media por categoría (entrenamiento) | 49.7% | ±22.5 pp | 25.5% | 112.4% | 17 |
+| Media móvil 7 días | 49.8% | ±20.9 pp | 20.5% | 106.2% | 17 |
+| Último valor (día anterior) | 69.9% | ±35.3 pp | 22.4% | 158.3% | 17 |
+
+**Horizonte ventana de lead time (H = 7, suma de la ventana): 11 orígenes,
+33 ventanas-categoría.**
+
+| Método | Categoría | Filas | Real | Pronosticado | MAE | RMSE | WAPE | Exactitud | Acierto ±20% | R² | Desv. WAPE entre orígenes |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Modelo vigente** | accesorio | 11 | 589 | 977.8 | 35.34 | 38.13 | 66.0% | 34.0% | 0.0% | −13.122 | ±50.0 pp |
+|  | esmalte | 11 | 2933 | 3094.9 | 31.41 | 39.10 | 11.8% | 88.2% | 81.8% | −0.932 | ±8.4 pp |
+|  | látex | 11 | 2523 | 2066.6 | 46.49 | 50.17 | 20.3% | 79.7% | 45.5% | −5.229 | ±7.2 pp |
+| | **Total** (R² global) | 33 | 6045 | 6139.3 | 37.75 | 42.82 | **20.6%** | **79.4%** | 42.4% | 0.798 | ±4.6 pp |
+| Media por categoría (entrenamiento) | accesorio | 11 | 589 | 675.1 | 12.98 | 15.90 | 24.2% | 75.8% | 54.5% | −1.454 | ±27.3 pp |
+|  | esmalte | 11 | 2933 | 3121.5 | 32.32 | 38.87 | 12.1% | 87.9% | 81.8% | −0.909 | ±7.5 pp |
+|  | látex | 11 | 2523 | 1868.2 | 59.52 | 62.16 | 26.0% | 74.0% | 9.1% | −8.563 | ±6.7 pp |
+| | **Total** (R² global) | 33 | 6045 | 5664.8 | 34.94 | 43.31 | **19.1%** | **80.9%** | 48.5% | 0.793 | ±4.0 pp |
+| Media móvil 7 días | accesorio | 11 | 589 | 347.1 | 31.00 | 34.84 | 57.9% | 42.1% | 0.0% | −10.788 | ±23.4 pp |
+|  | esmalte | 11 | 2933 | 3236.5 | 56.80 | 64.06 | 21.3% | 78.7% | 54.5% | −4.186 | ±11.3 pp |
+|  | látex | 11 | 2523 | 2218.3 | 37.48 | 45.05 | 16.3% | 83.7% | 63.6% | −4.023 | ±11.3 pp |
+| | **Total** (R² global) | 33 | 6045 | 5801.9 | 41.76 | 49.49 | **22.8%** | **77.2%** | 39.4% | 0.730 | ±7.6 pp |
+| Último valor (día anterior) | accesorio | 11 | 589 | 476.0 | 57.73 | 60.56 | 107.8% | −7.8% | 0.0% | −34.616 | ±45.8 pp |
+|  | esmalte | 11 | 2933 | 3402.0 | 122.27 | 162.72 | 45.9% | 54.1% | 27.3% | −32.462 | ±41.5 pp |
+|  | látex | 11 | 2523 | 2429.0 | 96.73 | 119.15 | 42.2% | 57.8% | 27.3% | −34.136 | ±31.9 pp |
+| | **Total** (R² global) | 33 | 6045 | 6307.0 | 92.24 | 121.58 | **50.4%** | **49.6%** | 18.2% | −0.630 | ±27.3 pp |
+
+| Método | WAPE medio por origen | Desv. | Mín. | Máx. | Orígenes |
+|---|---:|---:|---:|---:|---:|
+| **Modelo vigente** | 20.6% | ±4.6 pp | 13.8% | 26.7% | 11 |
+| Media por categoría (entrenamiento) | 19.0% | ±4.0 pp | 14.8% | 26.0% | 11 |
+| Media móvil 7 días | 22.9% | ±7.6 pp | 10.3% | 38.4% | 11 |
+| Último valor (día anterior) | 50.9% | ±27.3 pp | 18.8% | 98.4% | 11 |
+
+### Interpretación
+
+- **En el horizonte de ventana, el que importa para la decisión, el modelo
+  no supera a las tres líneas base.** Supera a la media móvil de 7 días
+  (20.6% vs. 22.8% de WAPE) y al último valor (50.4%), pero **no a la media
+  por categoría de los días de ajuste** (19.1%). Por la regla fijada de
+  antemano, el modelo no puede presentarse como aportando valor frente a
+  predecir el promedio de cada categoría. La diferencia con la media (1.5
+  puntos) es menor que la dispersión entre orígenes de ambos (±4.6 y ±4.0
+  pp), así que tampoco hay evidencia de que sea peor: con este histórico
+  son indistinguibles.
+- **Por categoría, la desventaja viene de accesorio.** El modelo
+  pronostica 978 unidades contra 589 reales en esas ventanas (WAPE 66.0%
+  vs. 24.2% de la media). En esmalte empatan (11.8% vs. 12.1%), y en látex
+  el modelo es mejor que la media (20.3% vs. 26.0%) aunque no que la media
+  móvil (16.3%).
+- **El error de la ventana es mucho menor que el diario.** WAPE de 20.6%
+  (exactitud 79.4%) frente a 50.2% por día: los errores diarios se
+  compensan dentro de la semana. Para dimensionar el punto de reorden, el
+  número relevante es el de la ventana.
+- **El resultado de la ventana es más estable entre orígenes:** ±4.6 pp
+  para el modelo, frente a ±16.5 pp en el horizonte diario.
+- **En el horizonte diario el modelo tampoco supera a las medias** (50.2%
+  vs. 48.2% la media móvil y 48.4% la media por categoría), lo mismo que
+  con la división única. La dispersión diaria (±16.5 a ±22.5 pp) es mucho
+  mayor que esas diferencias.
+- **El R² intra-categoría de la ventana no es informativo aquí.** Las
+  ventanas de orígenes consecutivos comparten 6 de 7 días, así que dentro
+  de una categoría sus sumas casi no varían. Cualquier sesgo de nivel
+  domina y el R² sale muy negativo para todos los métodos. El R² global de
+  0.80 vuelve a reflejar sobre todo la diferencia de nivel entre
+  categorías.
+- Esto justifica reentrenar y volver a correr `evaluar_predicciones` cuando
+  haya más histórico. No se modificó nada para que el modelo supere a las
+  líneas base.
+
+### Resultado anterior con la división única
+
+Corrida del 02/10/2026 con `--no-walk-forward`
+(`artefactos/evaluacion/evaluacion_categoria_20261002_054829.json`): modelo
+vigente #5, 24 días de ajuste (01/08–24/08) y 7 de prueba (25/08–31/08), 21
+filas, pronóstico diario a un paso (variables con la demanda real hasta el
+día anterior). La opción `--no-walk-forward --horizonte diario` lo
+reproduce y es la única corrida que se guarda en los campos de evaluación
+de `ModeloEntrenado`.
 
 | | MAE | RMSE | WAPE | Exactitud | Acierto ±20% | R² global | Exact. accesorio | Exact. esmalte | Exact. látex | R² intra accesorio | R² intra esmalte | R² intra látex |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -483,29 +651,9 @@ Modelo y líneas base sobre el mismo test:
 | Media móvil 7 días | 11.37 | 13.42 | **43.6%** | **56.4%** | 23.8% | **0.4447** | 0.3% | 53.2% | 70.9% | −0.2975 | −0.1511 | −0.2041 |
 | Último valor (día anterior) | 14.90 | 18.06 | 57.1% | 42.9% | 14.3% | −0.0063 | −71.7% | 57.8% | 52.7% | −2.2268 | −0.6228 | −1.4978 |
 
-### Interpretación
-
-- **El modelo vigente no supera a la media móvil de 7 días ni a la media
-  por categoría.** Las supera solo al último valor. En WAPE queda 2.0 puntos
-  por encima de la media móvil (45.6% vs. 43.6%) y 1.0 por encima de la
-  media por categoría. La media móvil también lo supera en R² global (0.445
-  vs. 0.401) y en acierto ±20% (23.8% vs. 19.0%). Con este test el modelo no
-  puede presentarse como aportando valor frente a una media móvil.
-- **El R² global de 0.40 se explica por la diferencia de nivel entre
-  categorías.** Dentro de cada categoría el R² del modelo es negativo en las
-  tres (−0.28, −0.38, −0.14): día a día, el pronóstico explica menos que
-  predecir la media de la propia categoría en el test. Las líneas base
-  también salen negativas: con 7 días por categoría casi no hay movimiento
-  predecible que explicar.
-- **Exactitud por categoría:** látex 70.9%, esmalte 49.9% y accesorio
-  −5.7%. En accesorio el modelo sobrestimó (82 pronosticadas vs. 53 reales)
-  y el error total superó a la demanda.
-- Con 7 días × 3 categorías (21 filas), las diferencias de 1 a 2 puntos de
-  WAPE entre el modelo y las medias no son concluyentes en ninguna
-  dirección (el R² del modelo varía ±0.019 con solo cambiar la semilla, ver
-  [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción)).
-  Este resultado justifica reentrenar y volver a correr
-  `evaluar_predicciones` cuando haya más histórico.
+Con 21 filas el modelo no superaba a la media móvil ni a la media por
+categoría. El R² global de 0.40 se explicaba por la diferencia de nivel
+entre categorías: dentro de cada una el R² era negativo.
 
 ## Limitaciones
 

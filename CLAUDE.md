@@ -167,14 +167,31 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     acierto dentro de tolerancia relativa (`PRONOSTICO_TOLERANCIA_RELATIVA`,
     0.20 = regla del 20% de anomalías; fijada antes de evaluar, no se ajusta
     por resultado) y R² intra-categoría junto al global. Tres líneas base
-    sobre el mismo test (media por categoría del train, media móvil 7 días,
-    último valor). Evalúa el ajustado vigente sobre su propio test temporal
-    (`dias_prueba`), guarda la corrida en `ModeloEntrenado` (campos `wape`,
-    `exactitud`, ..., read-only en admin) y en `artefactos/evaluacion/`; no
-    activa ni registra modelos. Sin tolerancia en unidades (no hay lotes de
-    compra; el SS por producto no se traduce a error diario por categoría,
-    ver README). Resultado 02/10/2026: el modelo #5 NO supera a la media
-    móvil de 7 días ni a la media por categoría en WAPE.
+    con el mismo procedimiento (media por categoría de los días de ajuste,
+    media móvil 7 días, último valor). Sin tolerancia en unidades (no hay
+    lotes de compra; el SS por producto no se traduce a error diario por
+    categoría, ver README). No activa ni registra modelos; reporte JSON en
+    `artefactos/evaluacion/`.
+  - Validación de origen móvil (`walk_forward.py`, por defecto en
+    `evaluar_predicciones`; `--no-walk-forward` reproduce la división única
+    anterior con el archivo del vigente y es lo único que se guarda en los
+    campos `wape`, `exactitud`, ... de `ModeloEntrenado`): por cada origen t
+    (desde el día `MIN_DIAS_ENTRENAMIENTO` hasta N−H) rehace el ajuste fino
+    con la configuración del vigente sobre el modelo base (que no se
+    reentrena) usando solo los días 1..t, y pronostica t+1..t+H encadenando
+    (cada predicción, con piso en 0, alimenta el día siguiente; nunca la
+    demanda real intermedia). `--horizonte diario|ventana|ambos`: diario
+    H=1; ventana H = mediana redondeada hacia arriba del lead time que usa
+    el motor para el SS (`decisiones.motor.lead_time_producto`) en los
+    productos activos de las categorías evaluadas (hoy 7), comparando la
+    suma de la ventana. Reporta la dispersión del WAPE entre orígenes
+    (desv. muestral de un WAPE total por origen) y advierte con menos de 5
+    orígenes; sin ningún origen posible, CommandError. Resultado
+    02/10/2026 (11 orígenes de ventana): el modelo NO supera a la media por
+    categoría en la ventana (WAPE 20.6% vs. 19.1%; ±4.6 / ±4.0 pp entre
+    orígenes); sí a la media móvil (22.8%) y al último valor (50.4%). En
+    diario no supera a ninguna de las dos medias. No cambiar nada para que
+    las supere: es el resultado reportado.
 - Modelos `ModeloEntrenado` (métricas, hiperparámetros, fase, archivo,
   `activo`, y para la fase "ajustado" también `origen_datos_internos`,
   `dias_entrenamiento` y `dias_prueba`) y `Prediccion` (producto, fecha

@@ -257,31 +257,21 @@ LINEAS_BASE = {
 }
 
 
-def comparar_exactitud(train, test, y_modelo, tolerancia_relativa=None):
-    """Evalúa el modelo (predicciones y_modelo, alineadas con test) y las
-    tres LINEAS_BASE sobre el mismo test, con las mismas métricas
-    (evaluar_exactitud). La categoría de cada fila es su serie_id (modelo a
-    nivel de categoría).
+def comparar_metodos(predicciones, tolerancia_relativa=None):
+    """Evalúa el modelo y las tres LINEAS_BASE con las mismas métricas
+    (evaluar_exactitud). `predicciones` tiene una fila por pronóstico, con
+    'categoria', 'real' y una columna por método ('modelo' y cada clave de
+    LINEAS_BASE); las filas pueden ser días o ventanas.
 
-    Devuelve {'modelo': ..., <clave línea base>: ..., 'predicciones':
-    DataFrame fila a fila (fecha, categoria, real y cada pronóstico),
-    'mejor_linea_base': clave de la de menor WAPE total, 'supera': {clave:
-    bool}}. El modelo supera a una línea base si su WAPE total es menor; solo
-    aporta valor si las supera a las tres. Se usa el WAPE porque es la
-    métrica que importa para dimensionar pedidos (error relativo al volumen)."""
-    y_real = test['cantidad'].to_numpy(dtype=float)
-    categorias = test['serie_id'].astype(str).to_numpy()
-    predicciones = pd.DataFrame({
-        'fecha': test['fecha'].to_numpy(),
-        'categoria': categorias,
-        'real': y_real,
-        'modelo': np.asarray(y_modelo, dtype=float),
-    })
-    for clave, (_, funcion) in LINEAS_BASE.items():
-        predicciones[clave] = funcion(train, test).to_numpy(dtype=float)
-
+    Devuelve {<método>: evaluar_exactitud(...), 'mejor_linea_base': clave de
+    la de menor WAPE total, 'supera': {clave: bool}}. El modelo supera a una
+    línea base si su WAPE total es menor; solo aporta valor si las supera a
+    las tres. Se usa el WAPE porque es la métrica que importa para
+    dimensionar pedidos (error relativo al volumen)."""
     resultado = {
-        clave: evaluar_exactitud(y_real, predicciones[clave], categorias, tolerancia_relativa)
+        clave: evaluar_exactitud(
+            predicciones['real'], predicciones[clave], predicciones['categoria'], tolerancia_relativa,
+        )
         for clave in ['modelo', *LINEAS_BASE]
     }
 
@@ -291,5 +281,25 @@ def comparar_exactitud(train, test, y_modelo, tolerancia_relativa=None):
 
     resultado['mejor_linea_base'] = min(LINEAS_BASE, key=wape_total)
     resultado['supera'] = {clave: wape_total('modelo') < wape_total(clave) for clave in LINEAS_BASE}
+    return resultado
+
+
+def comparar_exactitud(train, test, y_modelo, tolerancia_relativa=None):
+    """División única: evalúa el modelo (predicciones y_modelo, alineadas
+    con test) y las tres LINEAS_BASE sobre el mismo test (ver
+    comparar_metodos). La categoría de cada fila es su serie_id (modelo a
+    nivel de categoría). Además de lo que devuelve comparar_metodos incluye
+    'predicciones', el DataFrame fila a fila (fecha, categoria, real y cada
+    pronóstico)."""
+    predicciones = pd.DataFrame({
+        'fecha': test['fecha'].to_numpy(),
+        'categoria': test['serie_id'].astype(str).to_numpy(),
+        'real': test['cantidad'].to_numpy(dtype=float),
+        'modelo': np.asarray(y_modelo, dtype=float),
+    })
+    for clave, (_, funcion) in LINEAS_BASE.items():
+        predicciones[clave] = funcion(train, test).to_numpy(dtype=float)
+
+    resultado = comparar_metodos(predicciones, tolerancia_relativa)
     resultado['predicciones'] = predicciones
     return resultado
