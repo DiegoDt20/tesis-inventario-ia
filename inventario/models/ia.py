@@ -71,6 +71,21 @@ class ModeloEntrenado(models.Model):
     # (ver MIN_DIAS_ENTRENAMIENTO en inventario/ml/entrenamiento.py).
     dias_entrenamiento = models.IntegerField(null=True, blank=True)
     dias_prueba = models.IntegerField(null=True, blank=True)
+    # Exactitud del pronóstico: última corrida de evaluar_predicciones sobre el
+    # test temporal de este modelo (ver inventario/ml/evaluacion.py). Null
+    # hasta que se evalúa. wape/exactitud son el total agregado;
+    # r2_intra_categoria y acierto_tolerancia son {categoria: valor}.
+    fecha_evaluacion = models.DateTimeField(null=True, blank=True)
+    wape = models.FloatField(null=True, blank=True)
+    exactitud = models.FloatField(null=True, blank=True)
+    r2_intra_categoria = models.JSONField(null=True, blank=True)
+    acierto_tolerancia = models.JSONField(null=True, blank=True)
+    tolerancia_relativa = models.FloatField(null=True, blank=True)
+    # La línea base de menor WAPE en esa misma corrida, para comparar.
+    mejor_linea_base = models.CharField(max_length=30, blank=True)
+    wape_mejor_linea_base = models.FloatField(null=True, blank=True)
+    exactitud_mejor_linea_base = models.FloatField(null=True, blank=True)
+    metricas_mejor_linea_base = models.JSONField(null=True, blank=True)
     ruta_archivo = models.CharField(max_length=500)
     activo = models.BooleanField(default=True)
 

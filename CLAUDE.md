@@ -161,6 +161,20 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     del README. Las variables de `COLUMNAS_EXPERIMENTALES`
     (`construir_features(..., experimentales=True)`) no son del modelo
     vigente: `predecir_demanda` sigue usando `COLUMNAS_FEATURES`.
+  - Exactitud del pronóstico (`evaluacion.py` + comando
+    `evaluar_predicciones --origen`): WAPE (total = agregado, no promedio
+    por categoría; None si Σ real = 0), exactitud = 1 − WAPE sin truncar,
+    acierto dentro de tolerancia relativa (`PRONOSTICO_TOLERANCIA_RELATIVA`,
+    0.20 = regla del 20% de anomalías; fijada antes de evaluar, no se ajusta
+    por resultado) y R² intra-categoría junto al global. Tres líneas base
+    sobre el mismo test (media por categoría del train, media móvil 7 días,
+    último valor). Evalúa el ajustado vigente sobre su propio test temporal
+    (`dias_prueba`), guarda la corrida en `ModeloEntrenado` (campos `wape`,
+    `exactitud`, ..., read-only en admin) y en `artefactos/evaluacion/`; no
+    activa ni registra modelos. Sin tolerancia en unidades (no hay lotes de
+    compra; el SS por producto no se traduce a error diario por categoría,
+    ver README). Resultado 02/10/2026: el modelo #5 NO supera a la media
+    móvil de 7 días ni a la media por categoría en WAPE.
 - Modelos `ModeloEntrenado` (métricas, hiperparámetros, fase, archivo,
   `activo`, y para la fase "ajustado" también `origen_datos_internos`,
   `dias_entrenamiento` y `dias_prueba`) y `Prediccion` (producto, fecha

@@ -174,6 +174,16 @@ EMPRESA_RAZON_SOCIAL = config('EMPRESA_RAZON_SOCIAL', default='')
 ANOMALIA_UMBRAL_ALTA = config('ANOMALIA_UMBRAL_ALTA', default=1.0, cast=float)
 ANOMALIA_UMBRAL_MEDIA = config('ANOMALIA_UMBRAL_MEDIA', default=0.40, cast=float)
 
+# Exactitud del pronóstico
+# ------------------------
+# Tolerancia relativa del "acierto dentro de tolerancia" de evaluar_predicciones:
+# un día cuenta como acierto si |real - pronóstico| / max(real, 1) <= este
+# valor. Se fija igual a la regla del 20% que el sistema ya usa como
+# diferencia tolerable entre stock de sistema y stock físico
+# (UMBRAL_DIFERENCIA_RELATIVA en inventario/ml/anomalias.py). Se fijó antes
+# de correr la evaluación y no se ajusta según el resultado.
+PRONOSTICO_TOLERANCIA_RELATIVA = config('PRONOSTICO_TOLERANCIA_RELATIVA', default=0.20, cast=float)
+
 # Registro (logging)
 # ------------------
 # Los módulos de inventario escriben en consola desde WARNING (p. ej. las

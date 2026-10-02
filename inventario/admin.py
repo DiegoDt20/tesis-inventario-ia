@@ -131,10 +131,15 @@ class CostoAlmacenamientoAdmin(admin.ModelAdmin):
 class ModeloEntrenadoAdmin(admin.ModelAdmin):
     list_display = (
         'fase', 'nivel', 'fecha_entrenamiento', 'algoritmo', 'mae', 'rmse', 'smape',
-        'r2', 'mae_linea_base', 'mae_solo_interno', 'activo', 'descartado',
+        'r2', 'mae_linea_base', 'mae_solo_interno', 'wape', 'exactitud', 'activo', 'descartado',
     )
     list_filter = ('fase', 'nivel', 'activo', 'descartado')
-    readonly_fields = ('fecha_entrenamiento',)
+    # Los resultados de evaluar_predicciones solo los escribe el comando.
+    readonly_fields = (
+        'fecha_entrenamiento', 'fecha_evaluacion', 'wape', 'exactitud', 'r2_intra_categoria',
+        'acierto_tolerancia', 'tolerancia_relativa', 'mejor_linea_base', 'wape_mejor_linea_base',
+        'exactitud_mejor_linea_base', 'metricas_mejor_linea_base',
+    )
     date_hierarchy = 'fecha_entrenamiento'
 
 

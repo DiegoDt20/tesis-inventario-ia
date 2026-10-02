@@ -182,6 +182,7 @@ ni se ponen credenciales directamente en `core/settings.py`.
 | `LLM_MODELO`           | Modelo servido por el proveedor.                                                      | `qwen2.5:7b`                         |
 | `LLM_URL`              | URL base de la API del proveedor (sin `/api/chat`).                                   | `http://localhost:11434`             |
 | `EMPRESA_RAZON_SOCIAL` | Opcional: si se define, el anonimizador la redacta antes de enviarla al LLM.          | *(vacío)*                            |
+| `PRONOSTICO_TOLERANCIA_RELATIVA` | Tolerancia del acierto del pronóstico: un día acierta si \|real − pronóstico\| / max(real, 1) ≤ este valor. Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `0.20` |
 
 ## Comandos de gestión
 
@@ -198,7 +199,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. Falla si `--dias-test` dejaría menos de 14 días para entrenar. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`) |
 | `optimizar_modelo`       | Busca hiperparámetros del ajuste con validación cruzada temporal, prueba variantes de la fase base y de variables, y compara todo sobre el mismo test. **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/optimizacion/` (JSON y CSV). Ver [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción). | `--origen` (`real`), `--nivel` (`categoria`), `--dias-test` (7), `--pliegues` (4), `--iteraciones` (100), `--quitar` (3), `--semilla` (42), `--semillas-ruido` (10), `--archivo-externo` |
 | `predecir_demanda`       | Genera predicciones de demanda diaria con el modelo ajustado activo (o el base si aún no hay ajustado).              | `--dias` (30), `--origen` (opcional)                                          |
-| `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas y calcula MAE, RMSE, SMAPE y R².                                 | —                                                                              |
+| `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas (solo con pedidos del origen y hasta el último día con pedidos de ese origen) y calcula MAE, RMSE, SMAPE y R². Además evalúa la exactitud del modelo ajustado vigente sobre su test temporal contra tres líneas base. **No activa ni registra ningún modelo**; guarda la corrida en el vigente y en `artefactos/evaluacion/`. Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `--origen` (`real`) |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
 | `indexar_conocimiento`   | Regenera el índice del asistente conversacional (borra y reconstruye `DocumentoIndexado`).                           | —                                                                              |
 | `recalcular_stock`       | Recalcula `stock_actual` de todos los productos a partir del historial de `Movimiento`.                              | —                                                                              |
@@ -379,6 +380,132 @@ fases): R² test **0.374 ± 0.019** (rango 0.340–0.398), R² rec. 0.417 ±
   que limita el R² son los datos, no los hiperparámetros. Volver a correr
   `optimizar_modelo` cuando haya al menos 90 días; con más días de
   validación, la búsqueda por CV deja de ajustarse al ruido.
+
+## Exactitud del pronóstico
+
+Comando `evaluar_predicciones` (funciones en `inventario/ml/evaluacion.py`).
+MAE, RMSE, SMAPE y R² no permiten afirmar nada sobre *exactitud* en el
+sentido que se usa en logística, así que se agregan las métricas estándar
+de gestión de inventario y tres líneas base contra las cuales compararlas.
+Las definiciones y la tolerancia se fijaron **antes** de correr la
+evaluación y no se ajustaron después de ver el resultado.
+
+### Métricas
+
+| Métrica | Fórmula | Qué mide |
+|---|---|---|
+| **WAPE** | Σ \|real − pronóstico\| / Σ real | Tamaño del error relativo al volumen vendido. |
+| **Exactitud** | 1 − WAPE | Lo mismo, expresado como acierto. Puede ser negativa (el error supera a la demanda, típico en baja rotación) y se reporta así, sin truncar a 0. |
+| **Acierto dentro de tolerancia** | % de días con \|real − pronóstico\| / max(real, 1) ≤ t | Con qué frecuencia el pronóstico de un día cae dentro del margen aceptable. El max(real, 1) evita dividir por cero los días sin demanda. |
+| **R² intra-categoría** | R² calculado dentro de cada categoría por separado | Cuánto del movimiento día a día de cada categoría explica el pronóstico. |
+| **R² global** | R² sobre todas las filas juntas (el que ya se reportaba) | Incluye la diferencia de nivel entre categorías (esmalte ~65 u/día, látex ~10, accesorios ~7): esa varianza entre categorías domina y lo infla. Se mantiene para no romper lo ya reportado. |
+
+- El WAPE **total** es el WAPE agregado sobre todas las filas (Σ \|error\| /
+  Σ real), no el promedio de los WAPE por categoría.
+- Si una categoría no tuvo demanda en el periodo (Σ real = 0), su WAPE no
+  está definido: se reporta como "—" y no entra en el WAPE total. Ninguna
+  categoría se excluye por tener baja rotación.
+- Sin varianza en la demanda real (o con menos de dos días) el R² tampoco
+  está definido y se reporta como "—".
+
+**R² y exactitud miden cosas distintas.** El R² mide cuánto del
+movimiento día a día se explica; el WAPE mide el tamaño del error relativo
+al volumen. Un pronóstico plano puede tener R² ≈ 0 y aun así un WAPE bajo
+si el nivel es correcto, y uno que sigue bien las subidas y bajadas puede
+tener un WAPE alto si está desplazado. Para dimensionar pedidos el WAPE es
+el más relevante (lo que importa es cuántas unidades sobran o faltan), pero
+ninguno reemplaza al otro: se reportan los dos.
+
+### Tolerancia
+
+- **Relativa: t = 0.20** (`PRONOSTICO_TOLERANCIA_RELATIVA` en `.env`). Es la
+  misma regla del 20% que el sistema ya usa como diferencia tolerable entre
+  stock de sistema y stock físico (detección de anomalías,
+  `UMBRAL_DIFERENCIA_RELATIVA`): un solo criterio de negocio para "diferencia
+  aceptable" en todo el sistema.
+- **Absoluta (en unidades): no se fijó.** No hay compras ni lotes de
+  proveedor registrados (`CompraDetalle` vacío), así que no hay un tamaño de
+  lote de compra en el cual anclarla. Se evaluó anclarla al stock de
+  seguridad que ya calcula el motor de decisiones (SS = z·σ·√L, la cantidad
+  que el negocio guarda justamente para absorber el error del pronóstico),
+  pero no tiene una traducción directa a un error diario por categoría. El
+  SS se calcula por producto y cubre los L = 7 días de lead time, no un día.
+  Sumado por categoría (lote vigente de recomendaciones, nivel de servicio
+  95%) da ≈150 u (accesorio), ≈804 u (esmalte) y ≈584 u (látex) frente a
+  una demanda diaria de ~7, ~65 y ~10 u, así que cualquier pronóstico
+  "acertaría". Pasarlo a una tolerancia diaria por categoría (dividir por
+  √L, o recalcular σ sobre la serie de la categoría en vez de sumar los σ de
+  cada producto) obliga a elegir una conversión, lo que equivale a elegir la
+  tolerancia. Se omite hasta que haya lotes de compra reales, o hasta que se
+  defina una conversión del SS antes de mirar resultados.
+
+### Líneas base
+
+Las tres se evalúan sobre exactamente las mismas filas del test que el
+modelo, con las mismas métricas:
+
+1. **Media por categoría** de los días de entrenamiento, repetida para todos
+   los días del test (ningún día del test entra en su cálculo). Es la
+   referencia natural del R² intra-categoría.
+2. **Media móvil de 7 días** por categoría, encadenada día a día: el día t
+   se pronostica con la demanda real de t−7 a t−1, la misma información que
+   usan las variables de rezago y media móvil del modelo.
+3. **Último valor** (persistencia): la demanda del día anterior.
+
+El modelo solo puede presentarse como aportando valor si supera a las tres
+en WAPE.
+
+### Resultados
+
+Corrida del 02/10/2026 (`artefactos/evaluacion/evaluacion_categoria_20261002_054829.json`):
+modelo ajustado vigente #5, datos reales de agosto 2026, nivel categoría.
+Misma división que su entrenamiento: 24 días de ajuste (01/08–24/08) y 7
+de prueba (25/08–31/08), 21 filas. Pronóstico a un paso. Las categorías
+base, solvente y temple no tienen pronóstico del modelo (menos de 15 días
+con venta; se gestionan solo con punto de reorden), así que no entran en la
+evaluación.
+
+Modelo vigente, por categoría:
+
+| Categoría | Días | Real | Pronosticado | MAE | WAPE | Exactitud | Acierto ±20% | R² intra |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| accesorio | 7 | 53 | 82.2 | 8.00 | 105.7% | −5.7% | 28.6% | −0.2777 |
+| esmalte | 7 | 237 | 290.2 | 16.95 | 50.1% | 49.9% | 14.3% | −0.3752 |
+| látex | 7 | 258 | 217.8 | 10.72 | 29.1% | 70.9% | 14.3% | −0.1374 |
+| **Total** | 21 | 548 | 590.2 | 11.89 | **45.6%** | **54.4%** | 19.0% | R² global 0.4013 |
+
+Modelo y líneas base sobre el mismo test:
+
+| | MAE | RMSE | WAPE | Exactitud | Acierto ±20% | R² global | Exact. accesorio | Exact. esmalte | Exact. látex | R² intra accesorio | R² intra esmalte | R² intra látex |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Modelo vigente** | 11.89 | 13.93 | 45.6% | 54.4% | 19.0% | 0.4013 | −5.7% | 49.9% | 70.9% | −0.2777 | −0.3752 | −0.1374 |
+| Media por categoría (entrenamiento) | 11.63 | 14.21 | 44.6% | 55.4% | 33.3% | 0.3769 | 14.0% | 54.1% | 65.2% | −0.0138 | −0.1465 | −0.8247 |
+| Media móvil 7 días | 11.37 | 13.42 | **43.6%** | **56.4%** | 23.8% | **0.4447** | 0.3% | 53.2% | 70.9% | −0.2975 | −0.1511 | −0.2041 |
+| Último valor (día anterior) | 14.90 | 18.06 | 57.1% | 42.9% | 14.3% | −0.0063 | −71.7% | 57.8% | 52.7% | −2.2268 | −0.6228 | −1.4978 |
+
+### Interpretación
+
+- **El modelo vigente no supera a la media móvil de 7 días ni a la media
+  por categoría.** Las supera solo al último valor. En WAPE queda 2.0 puntos
+  por encima de la media móvil (45.6% vs. 43.6%) y 1.0 por encima de la
+  media por categoría. La media móvil también lo supera en R² global (0.445
+  vs. 0.401) y en acierto ±20% (23.8% vs. 19.0%). Con este test el modelo no
+  puede presentarse como aportando valor frente a una media móvil.
+- **El R² global de 0.40 se explica por la diferencia de nivel entre
+  categorías.** Dentro de cada categoría el R² del modelo es negativo en las
+  tres (−0.28, −0.38, −0.14): día a día, el pronóstico explica menos que
+  predecir la media de la propia categoría en el test. Las líneas base
+  también salen negativas: con 7 días por categoría casi no hay movimiento
+  predecible que explicar.
+- **Exactitud por categoría:** látex 70.9%, esmalte 49.9% y accesorio
+  −5.7%. En accesorio el modelo sobrestimó (82 pronosticadas vs. 53 reales)
+  y el error total superó a la demanda.
+- Con 7 días × 3 categorías (21 filas), las diferencias de 1 a 2 puntos de
+  WAPE entre el modelo y las medias no son concluyentes en ninguna
+  dirección (el R² del modelo varía ±0.019 con solo cambiar la semilla, ver
+  [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción)).
+  Este resultado justifica reentrenar y volver a correr
+  `evaluar_predicciones` cuando haya más histórico.
 
 ## Limitaciones
 
