@@ -196,10 +196,11 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `crear_grupos_permisos`  | Crea/actualiza los grupos "administrador" (acceso total) y "operador" (pedidos, movimientos y conteos, sin borrar). | —                                                                              |
 | `detectar_anomalias`     | Corre los detectores de anomalías de control de existencias y guarda registros `Anomalia`.                          | `--origen` (opcional)                                                         |
 | `entrenar_base`          | Fase 1: preentrena el motor de predicción con el dataset externo de Kaggle.                                          | `--archivo` (por defecto `datos/train.csv`), `--dias-test` (30)               |
-| `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. Falla si `--dias-test` dejaría menos de 14 días para entrenar. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`) |
+| `entrenar_ajustado`      | Fase 2: continúa el entrenamiento del modelo base con datos internos (transferencia) y compara contra línea base y modelo solo-interno. Por defecto con escalado de nivel antes del ajuste fino (ver [Diagnóstico del sesgo de accesorio](#diagnóstico-del-sesgo-de-accesorio)); guarda la regla, los niveles y los factores en `ModeloEntrenado.escalado`. Falla si `--dias-test` dejaría menos de 14 días para entrenar, o si falta el dataset externo con el escalado activado. | `--origen prueba\|real` (por defecto `real`), `--dias-test` (30), `--nivel producto\|categoria` (por defecto `producto`), `--escalar-nivel`/`--no-escalar-nivel` (activado), `--archivo-externo` (`datos/train.csv`) |
 | `optimizar_modelo`       | Busca hiperparámetros del ajuste con validación cruzada temporal, prueba variantes de la fase base y de variables, y compara todo sobre el mismo test. **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/optimizacion/` (JSON y CSV). Ver [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción). | `--origen` (`real`), `--nivel` (`categoria`), `--dias-test` (7), `--pliegues` (4), `--iteraciones` (100), `--quitar` (3), `--semilla` (42), `--semillas-ruido` (10), `--archivo-externo` |
 | `predecir_demanda`       | Genera predicciones de demanda diaria con el modelo ajustado activo (o el base si aún no hay ajustado).              | `--dias` (30), `--origen` (opcional)                                          |
 | `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas (solo con pedidos del origen y hasta el último día con pedidos de ese origen) y calcula MAE, RMSE, SMAPE y R². Además evalúa la exactitud del modelo ajustado vigente contra tres líneas base, en horizonte diario y de ventana de lead time, con validación de origen móvil (o la división única de antes con `--no-walk-forward`). **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/evaluacion/` (y la división única diaria, también en el vigente). Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `--origen` (`real`), `--horizonte diario\|ventana\|ambos` (`ambos`), `--walk-forward`/`--no-walk-forward` (activado) |
+| `diagnosticar_sesgo`     | Diagnostica el sesgo sistemático del pronóstico en una categoría: lo caracteriza (signo, orígenes, posición en la ventana), contrasta cuatro hipótesis con una medición y un criterio fijo cada una y, solo si la causa dominante es el modelo base, evalúa el escalado de nivel antes del ajuste fino con el mismo walk-forward. **No toca datos ni activa ni registra modelos**; reporte en `artefactos/diagnostico/`. Ver [Diagnóstico del sesgo de accesorio](#diagnóstico-del-sesgo-de-accesorio). | `--categoria` (`accesorio`), `--origen` (`real`), `--archivo-externo` (`datos/train.csv`) |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
 | `indexar_conocimiento`   | Regenera el índice del asistente conversacional (borra y reconstruye `DocumentoIndexado`).                           | —                                                                              |
 | `recalcular_stock`       | Recalcula `stock_actual` de todos los productos a partir del historial de `Movimiento`.                              | —                                                                              |
@@ -531,6 +532,11 @@ decisión.
 
 ### Resultados con validación de origen móvil
 
+Desde el 03/10/2026 el vigente es el #6, con escalado de nivel. Sus
+resultados están en [Adopción del escalado](#adopción-del-escalado-modelo-6).
+Lo que sigue es la corrida del modelo anterior (#5, sin escalado), que es
+el "antes".
+
 Corrida del 02/10/2026
 (`artefactos/evaluacion/evaluacion_walkforward_20261002_060705.json`):
 configuración del modelo vigente #5 (ajuste `n_estimators=50,
@@ -611,7 +617,8 @@ entran en la evaluación. "Filas" = orígenes × categorías. En las filas
   son indistinguibles.
 - **Por categoría, la desventaja viene de accesorio.** El modelo
   pronostica 978 unidades contra 589 reales en esas ventanas (WAPE 66.0%
-  vs. 24.2% de la media). En esmalte empatan (11.8% vs. 12.1%), y en látex
+  vs. 24.2% de la media). La causa está diagnosticada en
+  [Diagnóstico del sesgo de accesorio](#diagnóstico-del-sesgo-de-accesorio). En esmalte empatan (11.8% vs. 12.1%), y en látex
   el modelo es mejor que la media (20.3% vs. 26.0%) aunque no que la media
   móvil (16.3%).
 - **El error de la ventana es mucho menor que el diario.** WAPE de 20.6%
@@ -633,6 +640,271 @@ entran en la evaluación. "Filas" = orígenes × categorías. En las filas
 - Esto justifica reentrenar y volver a correr `evaluar_predicciones` cuando
   haya más histórico. No se modificó nada para que el modelo supere a las
   líneas base.
+
+### Diagnóstico del sesgo de accesorio
+
+Comando `diagnosticar_sesgo` (`inventario/ml/diagnostico_sesgo.py`). Corrida
+del 03/10/2026
+(`artefactos/diagnostico/diagnostico_sesgo_accesorio_20261004_032212.json`),
+mismos datos, orígenes y configuración que la sección anterior. Es
+diagnóstico, no optimización: primero se identifica la causa con una
+medición por hipótesis y solo después se evalúa la corrección de esa causa,
+una sola variante, definida antes de correrla. Error con signo =
+pronóstico − real (positivo = sobreestimación).
+
+**1. Qué tipo de sesgo es.**
+
+| | Accesorio | Esmalte | Látex |
+|---|---:|---:|---:|
+| Ventana (H = 7): real / pronosticado | 589 / 977.8 | 2933 / 3094.9 | 2523 / 2066.6 |
+| Ventana: sesgo relativo Σ(pron. − real) / Σ real | **+66.0%** | +5.5% | −18.1% |
+| Ventana: orígenes con sobreestimación | **11 de 11** | 8 de 11 | 1 de 11 |
+| Diario (H = 1): real / pronosticado | 121 / 208.5 | 666 / 695.7 | 581 / 486.0 |
+| Diario: sesgo relativo | **+72.3%** | +4.5% | −16.3% |
+
+Error medio con signo de accesorio por **posición** dentro de la ventana
+(no por fecha): día 1 +5.45, día 2 +6.47, día 3 +5.54, día 4 +5.85, día 5
++3.39, día 6 +3.97, día 7 +4.67 unidades. No crece con la posición: el
+sesgo ya está en el primer día pronosticado y **no viene del
+encadenamiento**. En horizonte diario, sin encadenar, la proporción es la
+misma (+72%).
+
+**2. Hipótesis, en orden.** Criterios fijos (constantes del módulo): una
+hipótesis "explica" el sesgo si da cuenta de al menos el 50% de él con el
+mismo signo; "muchos ceros" es al menos el doble de días en cero que la
+categoría que más tiene entre las demás.
+
+- **(a) El sesgo viene del modelo base: IDENTIFICADA, causa dominante.**
+  - El base #1 sin ajustar, en los mismos orígenes, ya pronostica 874.3
+    contra 589 en la ventana (+48.4%, 11 de 11 orígenes) y 195.4 contra 121
+    en diario (+61.5%). Es el **73% del sesgo** del vigente (+66.0%); el
+    ajuste fino agrega el resto. En esmalte (+9.6%) y látex (−19.2%) el
+    base no sobreestima de forma sistemática.
+  - Mecanismo, medido con la curva de respuesta (pronóstico a un paso con
+    el historial constante a cada nivel, fechas de agosto):
+
+    | Nivel del historial (u/día) | 0 | 2 | 5 | 8 | 10 | 15 | 20 | 30 | 40 | 60 |
+    |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+    | Base #1 | 10.8 | 10.8 | 10.8 | 10.9 | 10.9 | 15.6 | 20.2 | 29.6 | 39.1 | 58.6 |
+    | Vigente #5 | 11.4 | 11.2 | 11.3 | 10.5 | 10.4 | 16.1 | 20.8 | 30.4 | 33.7 | 52.2 |
+
+    Por debajo de ~10 u/día el modelo **tiene un piso**: pronostica ~11
+    aunque el historial sea 0, 2 o 5. Por encima de 15 sigue el nivel.
+    Accesorio vive debajo del piso: 8.4 u/día en agosto y 7.1 en los días
+    pronosticados. Esmalte (38.4) y látex (28.5) están en la zona donde el
+    modelo sigue el nivel. El piso viene del dataset externo: la media
+    diaria por serie de Kaggle va de 12.7 a 112.6 (mediana 50.0) y solo el
+    0.54% de sus días tiene demanda ≤ 8.4. El base nunca aprendió a
+    pronosticar tan bajo, y 50 árboles con learning rate 0.01 no alcanzan
+    para borrarlo (la curva del vigente casi no cambia).
+- **(b) El piso en cero introduce asimetría: descartada.** Ninguna de las
+  231 predicciones del vigente en la ventana fue negativa (0 recortadas en
+  las tres categorías); el sesgo con y sin recorte es idéntico. Es
+  coherente con (a): el modelo nunca baja de ~10, así que nunca llega a 0.
+- **(c) Las medias móviles se degradan con muchos ceros: descartada.**
+  Accesorio sí tiene muchos más días en cero (38.7% contra 6.5% de esmalte
+  y látex), pero la línea base de media móvil de 7 días, que es
+  exactamente esa variable, **subestima** accesorio (−41.1%). Las medias
+  móviles con ceros no empujan hacia arriba. Además, por (a), el modelo no
+  responde a esas variables por debajo de ~10 u/día.
+- **(d) La categoría mezcla productos de rotación distinta: no contrastable
+  como causa** (el modelo pronostica la categoría y nunca ve productos);
+  se reporta como descripción. De 27 productos activos de accesorio, 13
+  tienen pedidos en agosto y 14 ninguno. Los 3 mayores (PIN-083 base de
+  rodillo, PIN-041 brocha Tumi, PIN-241 espátula) concentran el 49.8%, y
+  ningún producto tiene pedidos en más de 3 días (mediana 1). La demanda
+  de accesorio es de pedidos grandes y esporádicos (10 a 30 unidades de un
+  producto en un día), no un flujo diario de muchos productos. Es una
+  limitación de la agrupación por categoría; no se recategorizó nada.
+
+**3. Corrección de (a), evaluada antes de adoptarla.** Escalado de
+nivel antes del ajuste fino (`inventario/ml/escalado.py`): en cada origen,
+una serie cuya media diaria en los días de ajuste está por debajo de la
+serie externa de menor nivel (12.73 u/día) se multiplica para llevarla a
+la mediana externa (50.03 u/día). Se ajusta y pronostica en esa escala, y
+el pronóstico se divide por el mismo factor. Así la transferencia aporta la
+forma temporal y no el nivel. Las otras series no se tocan: en agosto solo
+accesorio queda escalada (factor 5.07 a 6.42 según el origen). Los dos
+niveles salen del dataset externo y se fijaron antes de correr la
+corrección. Es la única variante evaluada. Se usaron el mismo walk-forward,
+los mismos orígenes y las mismas líneas base.
+
+| Ventana (H = 7) | Real | Pronóst. antes → después | Sesgo antes → después | WAPE antes → después | WAPE media cat. | WAPE media móvil 7 | WAPE último valor |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| accesorio | 589 | 977.8 → 773.2 | +66.0% → +31.3% | 66.0% → 32.8% | 24.2% | 57.9% | 107.8% |
+| esmalte | 2933 | 3094.9 → 3144.4 | +5.5% → +7.2% | 11.8% → 13.2% | 12.1% | 21.3% | 45.9% |
+| látex | 2523 | 2066.6 → 2177.2 | −18.1% → −13.7% | 20.3% → 16.3% | 26.0% | 16.3% | 42.2% |
+| **Total** | 6045 | 6139.3 → 6094.7 | +1.6% → +0.8% | **20.6% → 16.4%** | 19.1% | 22.8% | 50.4% |
+
+| Diario (H = 1) | Real | Pronóst. antes → después | Sesgo antes → después | WAPE antes → después | WAPE media cat. | WAPE media móvil 7 | WAPE último valor |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| accesorio | 121 | 208.5 → 149.9 | +72.3% → +23.8% | 111.4% → 103.0% | 101.7% | 97.5% | 145.5% |
+| esmalte | 666 | 695.7 → 716.4 | +4.5% → +7.6% | 48.3% → 50.7% | 45.0% | 47.9% | 63.7% |
+| látex | 581 | 486.0 → 496.3 | −16.3% → −14.6% | 39.6% → 41.0% | 41.1% | 38.4% | 50.8% |
+| **Total** | 1368 | 1390.2 → 1362.6 | +1.6% → −0.4% | 50.2% → 51.2% | 48.4% | 48.2% | 65.4% |
+
+- **En la ventana, con el escalado el modelo supera a las tres líneas
+  base** (16.4% vs. 19.1%, 22.8% y 50.4%). El WAPE total baja en **11 de
+  11 orígenes** (comparación pareada, mismos orígenes) y el sesgo de
+  accesorio se reduce a la mitad. Repetida con las semillas 0 a 3 (fuera
+  del comando, solo para medir el ruido): antes 19.5–20.7%, después
+  15.3–17.0%. La mejora no es ruido de semilla.
+- **Lo que no arregla:** accesorio sigue sobreestimado (+31%) y sigue peor
+  que la media por categoría (32.8% vs. 24.2%). Parte del sesgo restante es
+  de los datos: accesorio vendió 16 u/día en la primera semana de agosto y
+  entre 3.7 y 6.6 después, así que cualquier método que use el nivel del
+  historial sobreestima (la media por categoría también: +14.6%).
+- **Efecto en las otras categorías:** sus datos de ajuste no cambian (lo
+  verifica un test), pero el ajuste fino es conjunto (árboles compartidos)
+  y sus pronósticos se mueven. Látex mejora (20.3% → 16.3%, 9 de 11
+  orígenes) y esmalte empeora un poco (11.8% → 13.2%, mejora en 3 de 11).
+  De la baja neta del error absoluto total (−255 u), −196 vienen de
+  accesorio, −101 de látex y +41 de esmalte.
+- **En diario no cambia la conclusión.** El total empeora levemente
+  (50.2% → 51.2%; baja en 8 de 17 orígenes) y el modelo sigue sin superar
+  a las dos medias.
+- Se adoptó después de tres verificaciones (sección siguiente). Cambia
+  el procedimiento de entrenamiento: hay que reflejarlo en la metodología
+  de la tesis.
+
+### Adopción del escalado (modelo #6)
+
+Antes de adoptarlo se verificaron tres cosas (03/10/2026):
+
+1. **Sin fuga en el factor.** El factor de cada origen se calcula con
+   `historial_hasta(origen)`, es decir, solo con los días ≤ origen. Lo
+   verifican dos tests (`EscaladoSinFugaTests`), iguales a los de fuga del
+   walk-forward:
+   - el conjunto de días que ve el factor es disjunto del tramo
+     pronosticado, y su último día es el origen;
+   - llevar a 10.000 unidades los días posteriores al origen no cambia ni
+     el factor ni ningún pronóstico. Si esos días entraran, accesorio
+     quedaría sobre el mínimo y su factor pasaría a 1.
+
+   En `entrenar_ajustado`, los factores se calculan solo con los días de
+   entrenamiento (`entrenar_fase_ajuste_escalado`; lo verifica un test que
+   altera los días de prueba).
+2. **El objetivo es una regla sobre el dataset externo, no una constante.**
+   `escalado.niveles_externos` calcula la mediana de las medias diarias
+   por serie de `datos/train.csv`: 50.03 u/día (no 50). Todos los
+   resultados se calcularon con ese valor. La media de las medias da
+   52.25. No se cambió a ella porque eso sería elegir la regla después de
+   ver el resultado.
+3. **El criterio es general, no una excepción para accesorio.** Se escala
+   cualquier serie cuya media diaria en los días de ajuste quede por
+   debajo de la serie externa de menor nivel (12.73 u/día). El piso
+   medido del base (salida mínima de la curva de respuesta, grilla de 0.5
+   u/día) es **10.76 u/día**: con un historial constante de 0 a 10.5
+   u/día, el base pronostica entre 10.76 y 10.93; desde 11 u/día sigue el
+   nivel. Las dos reglas clasifican igual en los 17 orígenes:
+
+   | Categoría | Media de ajuste por origen (u/día) | ¿Bajo el piso (10.76)? | ¿Bajo el mínimo externo (12.73)? |
+   |---|---|---|---|
+   | accesorio | 7.79 – 9.87 | sí | sí |
+   | látex | 21.40 – 28.13 | no | no |
+   | esmalte | 37.50 – 41.88 | no | no |
+
+   Base (0.83), solvente (3.13) y temple (3.57 u/día en agosto) también
+   están debajo del piso, pero no tienen pronóstico del modelo: se
+   gestionan por punto de reorden porque tienen menos de 15 días con venta.
+   Si alguna llega a 15 días con venta, se escala con la misma regla.
+
+**Aplicación.** `entrenar_ajustado --origen real --nivel categoria
+--dias-test 7` (la misma configuración que el #5, ahora con escalado por
+defecto) registró y activó el modelo **#6**
+(`artefactos/modelos_ml/ajustado_categoria_20261004_035433.json`;
+el #5 queda inactivo). Factores con los 24 días de entrenamiento: accesorio
+×5.829; esmalte y látex ×1. `predecir_demanda` usa esos factores guardados
+en `ModeloEntrenado.escalado`. `evaluar_predicciones` y
+`diagnosticar_sesgo` evalúan el vigente con el mismo procedimiento: en el
+walk-forward recalculan el factor en cada origen con sus días de ajuste, y
+en la división única usan los factores guardados.
+
+Resultado con validación de origen móvil
+(`artefactos/evaluacion/evaluacion_walkforward_20261004_035442.json`).
+Coincide exactamente con el "después" del diagnóstico.
+
+| Ventana (H = 7), WAPE | Real | Pronóst. #5 → #6 | Modelo #5 | **Modelo #6** | Media por categoría | Media móvil 7 días | Último valor |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| accesorio | 589 | 977.8 → 773.2 | 66.0% | **32.8%** | 24.2% | 57.9% | 107.8% |
+| esmalte | 2933 | 3094.9 → 3144.4 | 11.8% | **13.2%** | 12.1% | 21.3% | 45.9% |
+| látex | 2523 | 2066.6 → 2177.2 | 20.3% | **16.3%** | 26.0% | 16.3% | 42.2% |
+| **Total** | 6045 | 6139.3 → 6094.7 | 20.6% | **16.4%** | 19.1% | 22.8% | 50.4% |
+
+| Diario (H = 1), WAPE | Real | Pronóst. #5 → #6 | Modelo #5 | **Modelo #6** | Media por categoría | Media móvil 7 días | Último valor |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| accesorio | 121 | 208.5 → 149.9 | 111.4% | **103.0%** | 101.7% | 97.5% | 145.5% |
+| esmalte | 666 | 695.7 → 716.4 | 48.3% | **50.7%** | 45.0% | 47.9% | 63.7% |
+| látex | 581 | 486.0 → 496.3 | 39.6% | **41.0%** | 41.1% | 38.4% | 50.8% |
+| **Total** | 1368 | 1390.2 → 1362.6 | 50.2% | **51.2%** | 48.4% | 48.2% | 65.4% |
+
+- **En la ventana de lead time, el modelo #6 supera a las tres líneas
+  base** (16.4% ±4.7 pp entre orígenes, contra 19.1% ±4.0 de la media por
+  categoría). El #5 no las superaba. En la comparación pareada #6 vs. #5,
+  el error total baja en los 11 orígenes.
+- **Origen por origen contra cada línea base** (`evaluar_predicciones`
+  imprime este cálculo y lo guarda como `comparacion_por_origen` en
+  `artefactos/evaluacion/evaluacion_walkforward_20261004_041640.json`).
+  Se cuenta en cuántos orígenes el WAPE total del #6 es menor y se aplica
+  una prueba de signos exacta (binomial, p = 0.5, sin empates):
+
+  | Ventana (H = 7) | #6 supera en | p bilateral | p unilateral | #5 superaba en |
+  |---|---:|---:|---:|---:|
+  | Media por categoría | **9 de 11** | **0.065** | 0.033 | 4 de 11 (p = 0.549) |
+  | Media móvil 7 días | 10 de 11 | 0.012 | 0.006 | — |
+  | Último valor | 10 de 11 | 0.012 | 0.006 | — |
+
+  En diario: 6 de 17 contra la media por categoría (p = 0.332), 7 de 17
+  contra la media móvil (p = 0.629) y 9 de 17 contra el último valor (p =
+  1.000).
+
+  Frase para la tesis: "en la ventana de lead time, el modelo supera a la
+  media por categoría en 9 de 11 orígenes (prueba de signos bilateral, p =
+  0.065)". Al nivel de 0.05 bilateral **no es significativo**. Además, los
+  orígenes consecutivos comparten 6 de sus 7 días pronosticados y casi
+  todo el histórico de ajuste: no son independientes y el p real es mayor
+  que el informado. Con ventanas sin solapamiento solo habría 2 orígenes en
+  agosto. El resultado es favorable pero no concluyente; hace falta más
+  histórico.
+- **En el horizonte diario sigue sin superar a las dos medias.**
+- **La división única de 21 filas (a un paso) queda prácticamente igual:**
+  WAPE 45.6% → 46.0%, R² global 0.401 → 0.341, exactitud de accesorio
+  −5.7% → 6.0%. Con 21 filas no hay diferencia que leer. Esa corrida es
+  la que queda guardada en los campos de evaluación del #6.
+- **Accesorio sigue sobreestimado** (+31% en la ventana) y sigue peor que
+  la media por categoría. El sesgo restante viene en parte del cambio de
+  nivel de agosto (16 u/día la primera semana, 4–7 después).
+- `optimizar_modelo` sigue evaluando el procedimiento sin escalado. Sus
+  resultados son del #5.
+
+**Recomendaciones con el #6** (03/10/2026). Se corrieron `predecir_demanda
+--origen real` (7680 predicciones, 30 días desde el 31/08, modelo #6) y
+`generar_recomendaciones` con los mismos parámetros del lote anterior
+(27/09, modelo #5: nivel de servicio 0.95, 30 días de cobertura, origen
+real). El stock de los 275 productos es el mismo en ambos lotes, así que
+las diferencias vienen solo del modelo.
+
+| Estado | Lote anterior (#5) | Lote nuevo (#6) |
+|---|---:|---:|
+| Crítico | 20 | 20 |
+| Reponer | 31 | 31 |
+| Normal | 197 | 198 |
+| Exceso | 27 | 26 |
+
+- Solo un producto cambia de estado: PIN-142 Vencedor Látex Premium pasa
+  de exceso a normal. Su punto de reorden sube de 6.32 a 6.46 con stock 19.
+  El cambio es por el reentrenamiento conjunto y no por accesorio.
+- **En accesorio no cambia ningún estado, pero baja la cantidad a
+  comprar.** Demanda pronosticada a 30 días: 313.3 → 231.3 u (−26%).
+  Cantidad sugerida: 244.5 → 172.9 u (−29%). Suma de los puntos de
+  reorden: 222.6 → 203.5. El estado no cambia porque el stock de seguridad
+  sale de la desviación de la demanda real (igual en los dos lotes) y la
+  baja de d̄·L no alcanza a cruzar ningún umbral. Por ejemplo, PIN-083
+  sigue crítico con stock 15 y punto de reorden 42.1 (antes 46.8), pero
+  con una compra sugerida de 70.2 en vez de 90.2.
+- Esmalte y látex suben un poco (cantidad sugerida 624.3 → 649.9 y 679.3 →
+  753.8). Látex estaba subestimado (−18% en la ventana) y ahora lo está
+  menos (−14%).
 
 ### Resultado anterior con la división única
 
@@ -668,7 +940,8 @@ entre categorías: dentro de cada una el R² era negativo.
   entrenamientos sucesivos. Medido: con solo cambiar la semilla, el R² en
   test de la configuración vigente varía entre 0.340 y 0.398 (ver
   [Optimización del modelo de predicción](#optimización-del-modelo-de-predicción)).
-- El pronóstico por categoría no captura diferencias finas entre productos de una misma categoría.
+- El pronóstico por categoría no captura diferencias finas entre productos de una misma categoría. En accesorio, 14 de 27 productos no tuvieron pedidos en agosto y ninguno tuvo pedidos en más de 3 días: la categoría junta pedidos grandes y esporádicos de productos distintos (ver [Diagnóstico del sesgo de accesorio](#diagnóstico-del-sesgo-de-accesorio)).
+- El modelo base preentrenado con Kaggle tiene un piso de 10.76 u/día (la serie externa de menor nivel promedia 12.7). El modelo #5 sobreestimaba accesorio por eso (+66% en la ventana de lead time). El vigente #6 escala las series bajo ese rango antes del ajuste fino y lo reduce a +31%, pero accesorio sigue sobreestimado.
 - Tres categorías quedan fuera del modelo por volumen insuficiente.
 - El detector de movimientos atípicos requiere al menos cinco movimientos previos por producto.
 - El modelo de lenguaje local puede producir redacciones imperfectas; las cifras siempre provienen del sistema.

@@ -33,8 +33,9 @@ from inventario.decisiones.motor import lead_time_producto
 from inventario.models import Producto
 
 from .entrenamiento import HIPERPARAMETROS_AJUSTE, MIN_DIAS_ENTRENAMIENTO, entrenar_modelo
+from .escalado import escalar, invertir
 from .evaluacion import LINEAS_BASE, calcular_wape, comparar_metodos
-from .features import COLUMNAS_FEATURES, construir_features
+from .features import COLUMNAS_FEATURES, construir_features, densificar_periodo
 from .optimizacion import predecir_recursivo
 
 HORIZONTE_DIARIO = 1
@@ -67,23 +68,6 @@ def horizonte_lead_time(categorias):
     if not lead_times:
         raise ValueError('No hay productos activos en las categorías evaluadas para leer el lead time.')
     return math.ceil(statistics.median(lead_times)), dict(sorted(Counter(lead_times).items()))
-
-
-def densificar_periodo(df):
-    """Cada serie a diario desde su primer día hasta el ÚLTIMO día del
-    periodo (de cualquier serie), con cero los días sin pedidos. Así el
-    historial hasta un origen t incluye los días sin venta previos a t."""
-    fecha_fin = pd.to_datetime(df['fecha']).max()
-    piezas = []
-    for serie_id, grupo in df.groupby('serie_id', sort=True):
-        diaria = grupo.groupby(pd.to_datetime(grupo['fecha']))['cantidad'].sum()
-        rango = pd.date_range(diaria.index.min(), fecha_fin, freq='D')
-        piezas.append(pd.DataFrame({
-            'fecha': rango,
-            'serie_id': serie_id,
-            'cantidad': diaria.reindex(rango, fill_value=0.0).to_numpy(dtype=float),
-        }))
-    return pd.concat(piezas, ignore_index=True)
 
 
 def calcular_origenes(fechas, horizonte, min_dias_ajuste=MIN_DIAS_ENTRENAMIENTO):
@@ -150,10 +134,18 @@ class ValidacionOrigenMovil:
     modelo base preentrenado (no se modifica; XGBoost lo copia al ajustar).
     `ajustar(train_features)` permite reemplazar el ajuste (tests, o la
     división única con el modelo vigente ya entrenado); por defecto continúa
-    el entrenamiento de booster_base con `hiperparametros_ajuste`."""
+    el entrenamiento de booster_base con `hiperparametros_ajuste`.
+
+    Solo para el diagnóstico de sesgo (diagnosticar_sesgo):
+    - `escalado(historial) -> {serie_id: factor}` (escalado.EscaladoNivel):
+      el modelo se ajusta y pronostica sobre la demanda multiplicada por el
+      factor de cada serie (calculado solo con los días <= origen) y el
+      pronóstico se divide por ese factor. Las líneas base no se escalan.
+    - `con_cruda=True` agrega la columna 'modelo_crudo': la salida del
+      modelo antes del piso en cero (el encadenamiento usa la de piso)."""
 
     def __init__(self, df_interno, booster_base=None, hiperparametros_ajuste=None,
-                 min_dias_ajuste=MIN_DIAS_ENTRENAMIENTO, ajustar=None):
+                 min_dias_ajuste=MIN_DIAS_ENTRENAMIENTO, ajustar=None, escalado=None, con_cruda=False):
         self.serie = densificar_periodo(df_interno)
         self.fechas = list(pd.date_range(self.serie['fecha'].min(), self.serie['fecha'].max(), freq='D'))
         self.min_dias_ajuste = min_dias_ajuste
@@ -161,7 +153,10 @@ class ValidacionOrigenMovil:
         self._ajustar = ajustar or (
             lambda train: entrenar_modelo(train, self.hiperparametros_ajuste, xgb_model=booster_base)
         )
+        self.escalado = escalado
+        self.con_cruda = con_cruda
         self._modelos = {}
+        self.factores = {}
 
     def origenes(self, horizonte):
         return calcular_origenes(self.fechas, horizonte, self.min_dias_ajuste)
@@ -170,12 +165,33 @@ class ValidacionOrigenMovil:
         """Demanda real de los días <= origen: lo único que ve ese origen."""
         return self.serie[self.serie['fecha'] <= origen].reset_index(drop=True)
 
+    def historial_modelo(self, origen):
+        """Historial con que se ajusta y pronostica el modelo: el real, o
+        escalado con los factores de ese origen si hay `escalado`."""
+        historial = self.historial_hasta(origen)
+        if self.escalado is None:
+            return historial
+        if origen not in self.factores:
+            self.factores[origen] = self.escalado(historial)
+        return escalar(historial, self.factores[origen])
+
     def modelo(self, origen):
         """Modelo ajustado solo con los días 1..origen (se reutiliza entre
         horizontes)."""
         if origen not in self._modelos:
-            self._modelos[origen] = self._ajustar(construir_features(self.historial_hasta(origen)))
+            self._modelos[origen] = self._ajustar(construir_features(self.historial_modelo(origen)))
         return self._modelos[origen]
+
+    def _pronostico_modelo(self, origen, fechas_objetivo):
+        """Pronóstico encadenado del modelo, en la escala original."""
+        pronostico = predecir_recursivo(
+            self.modelo(origen), self.historial_modelo(origen), fechas_objetivo, COLUMNAS_FEATURES, False,
+            con_cruda=self.con_cruda,
+        )
+        if self.escalado is not None:
+            columnas = ['prediccion', 'prediccion_cruda'] if self.con_cruda else ['prediccion']
+            pronostico = escalar(pronostico, invertir(self.factores[origen]), columnas)
+        return pronostico.rename(columns={'prediccion_cruda': 'modelo_crudo'})
 
     def pronosticar(self, origen, horizonte):
         """Pronóstico encadenado de los días origen+1..origen+horizonte, del
@@ -189,7 +205,7 @@ class ValidacionOrigenMovil:
             columns={'serie_id': 'categoria', 'cantidad': 'real'},
         )
         pronosticos = {
-            'modelo': predecir_recursivo(self.modelo(origen), historial, fechas_objetivo, COLUMNAS_FEATURES, False),
+            'modelo': self._pronostico_modelo(origen, fechas_objetivo),
             **{clave: funcion(historial, fechas_objetivo) for clave, funcion in PRONOSTICADORES_BASE.items()},
         }
         for clave, pronostico in pronosticos.items():
@@ -199,7 +215,8 @@ class ValidacionOrigenMovil:
             )
         resultado.insert(0, 'origen', origen)
         resultado['categoria'] = resultado['categoria'].astype(str)
-        return resultado[['origen', 'fecha', 'categoria', 'real', *METODOS]]
+        extra = ['modelo_crudo'] if self.con_cruda else []
+        return resultado[['origen', 'fecha', 'categoria', 'real', *METODOS, *extra]]
 
     def evaluar(self, horizonte):
         """Pronostica desde todos los orígenes con ese horizonte. Devuelve
@@ -263,10 +280,47 @@ def dispersion_entre_origenes(ventanas, columna):
     }
 
 
+def prueba_signos(gana, pierde):
+    """Prueba de signos exacta (binomial con p = 0.5) sobre comparaciones
+    pareadas, sin empates. Devuelve (p_bilateral, p_unilateral): la
+    unilateral es la probabilidad de ganar `gana` o más veces de
+    n = gana + pierde por azar; la bilateral, el doble de la cola más
+    extrema (tope 1). None si n = 0."""
+    n = gana + pierde
+    if n == 0:
+        return None, None
+
+    def cola(desde):
+        return sum(math.comb(n, k) for k in range(desde, n + 1)) / 2 ** n
+
+    return min(1.0, 2 * cola(max(gana, pierde))), cola(gana)
+
+
+def comparar_por_origen(dispersion, clave_base, clave_modelo='modelo'):
+    """Compara origen por origen el WAPE total del modelo contra el de una
+    línea base (los de dispersion_entre_origenes): en cuántos orígenes es
+    menor, mayor o igual, y la prueba de signos sobre los no empatados.
+
+    Los orígenes consecutivos comparten días de su ventana, así que no son
+    independientes: el p sale optimista y debe leerse como orientativo."""
+    modelo = dispersion[clave_modelo]['wape_por_origen']
+    base = dispersion[clave_base]['wape_por_origen']
+    comunes = [o for o in modelo if o in base]
+    gana = sum(modelo[o] < base[o] for o in comunes)
+    pierde = sum(modelo[o] > base[o] for o in comunes)
+    p_bilateral, p_unilateral = prueba_signos(gana, pierde)
+    return {
+        'origenes': len(comunes), 'gana': gana, 'pierde': pierde, 'empates': len(comunes) - gana - pierde,
+        'p_bilateral': p_bilateral, 'p_unilateral': p_unilateral,
+    }
+
+
 def resumir(ventanas, tolerancia_relativa=None):
     """Métricas de exactitud del modelo y de las líneas base sobre las
-    ventanas (comparar_metodos) más la dispersión entre orígenes de cada
-    método ('dispersion')."""
+    ventanas (comparar_metodos), la dispersión entre orígenes de cada
+    método ('dispersion') y la comparación origen por origen del modelo
+    contra cada línea base con prueba de signos ('por_origen')."""
     resultado = comparar_metodos(ventanas, tolerancia_relativa)
     resultado['dispersion'] = {clave: dispersion_entre_origenes(ventanas, clave) for clave in METODOS}
+    resultado['por_origen'] = {clave: comparar_por_origen(resultado['dispersion'], clave) for clave in LINEAS_BASE}
     return resultado

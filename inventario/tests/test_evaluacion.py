@@ -46,9 +46,11 @@ from inventario.ml.walk_forward import (
     ValidacionOrigenMovil,
     agregar_por_ventana,
     calcular_origenes,
+    comparar_por_origen,
     dispersion_entre_origenes,
     horizonte_lead_time,
     pronostico_media_movil_7,
+    prueba_signos,
 )
 from inventario.models import (
     Categoria,
@@ -486,6 +488,36 @@ class DispersionEntreOrigenesTests(SimpleTestCase):
             'origen': [pd.Timestamp('2026-08-14')], 'categoria': ['A'], 'real': [10.0], 'modelo': [8.0],
         })
         self.assertIsNone(dispersion_entre_origenes(ventanas, 'modelo')['desviacion'])
+
+
+class PruebaSignosTests(SimpleTestCase):
+    def test_valores_conocidos_a_mano(self):
+        # 9 de 11: P(X >= 9) = (C(11,9) + C(11,10) + C(11,11)) / 2^11 = 67 / 2048.
+        p_bilateral, p_unilateral = prueba_signos(9, 2)
+        self.assertAlmostEqual(p_unilateral, 67 / 2048)
+        self.assertAlmostEqual(p_bilateral, 134 / 2048)
+        # Simétrica: perder 9 de 11 da el mismo p bilateral; el unilateral es alto.
+        self.assertAlmostEqual(prueba_signos(2, 9)[0], 134 / 2048)
+        # P(X >= 2 de 11) = 1 - (C(11,0) + C(11,1)) / 2^11.
+        self.assertAlmostEqual(prueba_signos(2, 9)[1], 1 - 12 / 2048)
+
+    def test_mitad_y_mitad_y_sin_comparaciones(self):
+        self.assertEqual(prueba_signos(5, 5)[0], 1.0)
+        self.assertEqual(prueba_signos(0, 0), (None, None))
+
+    def test_comparacion_por_origen_cuenta_empates_aparte(self):
+        dispersion = {
+            'modelo': {'wape_por_origen': {'o1': 0.1, 'o2': 0.3, 'o3': 0.2, 'o4': 0.15}},
+            'media_categoria': {'wape_por_origen': {'o1': 0.2, 'o2': 0.2, 'o3': 0.2, 'o4': 0.25}},
+        }
+        resultado = comparar_por_origen(dispersion, 'media_categoria')
+        self.assertEqual(
+            {k: resultado[k] for k in ('origenes', 'gana', 'pierde', 'empates')},
+            {'origenes': 4, 'gana': 2, 'pierde': 1, 'empates': 1},
+        )
+        # La prueba usa solo los 3 no empatados: P(X >= 2 de 3) = 4/8.
+        self.assertAlmostEqual(resultado['p_unilateral'], 0.5)
+        self.assertAlmostEqual(resultado['p_bilateral'], 1.0)
 
 
 class HorizonteLeadTimeTests(TestCase):

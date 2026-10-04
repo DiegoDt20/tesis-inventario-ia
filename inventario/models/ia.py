@@ -86,6 +86,12 @@ class ModeloEntrenado(models.Model):
     wape_mejor_linea_base = models.FloatField(null=True, blank=True)
     exactitud_mejor_linea_base = models.FloatField(null=True, blank=True)
     metricas_mejor_linea_base = models.JSONField(null=True, blank=True)
+    # Solo fase "ajustado" con escalado de nivel (inventario/ml/escalado.py,
+    # entrenar_ajustado --escalar-nivel): regla, niveles del dataset externo
+    # y factor por serie calculado con los días de entrenamiento. Null si el
+    # modelo se ajustó sobre la demanda sin escalar (los anteriores al
+    # 03/10/2026). predecir_demanda y evaluar_predicciones lo leen de aquí.
+    escalado = models.JSONField(null=True, blank=True)
     ruta_archivo = models.CharField(max_length=500)
     activo = models.BooleanField(default=True)
 

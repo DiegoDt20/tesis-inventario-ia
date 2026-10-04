@@ -47,6 +47,23 @@ def _densificar(df):
     return pd.concat(piezas, ignore_index=True)
 
 
+def densificar_periodo(df):
+    """Cada serie a diario desde su primer día hasta el ÚLTIMO día del
+    periodo (de cualquier serie), con cero los días sin pedidos. Así el
+    historial hasta un origen t incluye los días sin venta previos a t."""
+    fecha_fin = pd.to_datetime(df['fecha']).max()
+    piezas = []
+    for serie_id, grupo in df.groupby('serie_id', sort=True):
+        diaria = grupo.groupby(pd.to_datetime(grupo['fecha']))['cantidad'].sum()
+        rango = pd.date_range(diaria.index.min(), fecha_fin, freq='D')
+        piezas.append(pd.DataFrame({
+            'fecha': rango,
+            'serie_id': serie_id,
+            'cantidad': diaria.reindex(rango, fill_value=0.0).to_numpy(dtype=float),
+        }))
+    return pd.concat(piezas, ignore_index=True)
+
+
 def construir_features(df, experimentales=False):
     """Recibe un DataFrame con columnas 'fecha', 'serie_id' y 'cantidad'
     (una fila por combinación fecha/serie; puede venir con huecos) y

@@ -142,14 +142,17 @@ def buscar_hiperparametros_ajuste(train, particiones, booster_base, columnas, n_
     return sorted(resultados, key=lambda r: -r['cv']['r2'])
 
 
-def predecir_recursivo(modelo, historial, fechas_objetivo, columnas, experimentales):
+def predecir_recursivo(modelo, historial, fechas_objetivo, columnas, experimentales, con_cruda=False):
     """Pronostica `fechas_objetivo` para todas las series de `historial`
     (fecha, serie_id, cantidad, solo días de entrenamiento) igual que
     predecir_demanda: día por día, cada predicción (con piso en cero) se
     agrega al historial para calcular los rezagos y medias del día
     siguiente. Nunca ve la demanda real del periodo pronosticado.
 
-    Devuelve un DataFrame con fecha, serie_id y prediccion."""
+    Devuelve un DataFrame con fecha, serie_id y prediccion. Con
+    con_cruda=True agrega 'prediccion_cruda', la salida del modelo antes del
+    piso en cero (solo para diagnóstico: el encadenamiento sigue usando la
+    predicción con piso)."""
     serie = historial[['fecha', 'serie_id', 'cantidad']].copy()
     series = serie['serie_id'].unique()
     resultados = []
@@ -159,10 +162,14 @@ def predecir_recursivo(modelo, historial, fechas_objetivo, columnas, experimenta
             pd.concat([serie, filas_objetivo], ignore_index=True), experimentales=experimentales,
         )
         fila = features[features['fecha'] == fecha]
-        prediccion = np.clip(modelo.predict(fila[columnas]), 0, None)
+        cruda = np.asarray(modelo.predict(fila[columnas]), dtype=float)
+        prediccion = np.clip(cruda, 0, None)
         nuevas = pd.DataFrame({'fecha': fecha, 'serie_id': fila['serie_id'].to_numpy(), 'cantidad': prediccion})
         serie = pd.concat([serie, nuevas], ignore_index=True)
-        resultados.append(nuevas.rename(columns={'cantidad': 'prediccion'}))
+        resultado = nuevas.rename(columns={'cantidad': 'prediccion'})
+        if con_cruda:
+            resultado['prediccion_cruda'] = cruda
+        resultados.append(resultado)
     return pd.concat(resultados, ignore_index=True)
 
 

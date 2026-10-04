@@ -1,4 +1,15 @@
-"""Comando de gestión: fase 2 del motor de predicción de demanda."""
+"""Comando de gestión: fase 2 del motor de predicción de demanda.
+
+Por defecto con escalado de nivel (inventario/ml/escalado.py): las series
+cuyo nivel en los días de entrenamiento queda por debajo del rango del
+dataset externo se llevan al nivel típico de ese dataset antes del ajuste
+fino, para que la transferencia aporte la forma temporal y no el nivel (ver
+el diagnóstico de sesgo de accesorio en el README). --no-escalar-nivel
+reproduce el procedimiento anterior.
+"""
+import argparse
+from pathlib import Path
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
@@ -9,11 +20,14 @@ from inventario.ml.carga_interna import (
     leer_demanda_interna_por_categoria,
     seleccionar_categorias_aptas,
 )
+from inventario.ml.carga_externa import RUTA_POR_DEFECTO, leer_datos_externos
 from inventario.ml.entrenamiento import (
     MIN_DIAS_ENTRENAMIENTO,
     entrenar_fase_ajuste,
+    entrenar_fase_ajuste_escalado,
     guardar_modelo,
 )
+from inventario.ml.escalado import EscaladoNivel, configuracion_guardada, niveles_externos
 from inventario.ml.evaluacion import comparar_modelos
 from inventario.models import ModeloEntrenado, NivelPrediccion, Origen
 
@@ -54,6 +68,18 @@ class Command(BaseCommand):
             ),
         )
 
+        parser.add_argument(
+            '--escalar-nivel', default=True, action=argparse.BooleanOptionalAction,
+            help=(
+                'Escalado de nivel antes del ajuste fino (por defecto activado). Con '
+                '--no-escalar-nivel, el ajuste sobre la demanda sin escalar de antes.'
+            ),
+        )
+        parser.add_argument(
+            '--archivo-externo', default=RUTA_POR_DEFECTO,
+            help=f'Dataset externo del que salen los niveles del escalado (por defecto {RUTA_POR_DEFECTO}).',
+        )
+
     def handle(self, *args, **options):
         origen = options['origen']
         dias_test = options['dias_test']
@@ -88,11 +114,21 @@ class Command(BaseCommand):
             f'{dias_entrenamiento} día(s) de entrenamiento, {dias_test} día(s) de prueba. '
             'Ajustando el modelo base...'
         )
-        modelo, train, test, hiperparametros = entrenar_fase_ajuste(
-            df_interno, modelo_base.ruta_archivo, dias_test=dias_test,
-        )
-
-        comparacion = comparar_modelos(train, test, modelo)
+        escalado = None
+        if options['escalar_nivel']:
+            niveles = self._niveles_externos(options['archivo_externo'])
+            modelo, train, test, hiperparametros, factores, test_modelo = entrenar_fase_ajuste_escalado(
+                df_interno, modelo_base.ruta_archivo, EscaladoNivel(niveles['minimo'], niveles['referencia']),
+                dias_test=dias_test,
+            )
+            comparacion = comparar_modelos(train, test, modelo, test_modelo=test_modelo, factores=factores)
+            escalado = configuracion_guardada(niveles, factores)
+            self._imprimir_escalado(escalado)
+        else:
+            modelo, train, test, hiperparametros = entrenar_fase_ajuste(
+                df_interno, modelo_base.ruta_archivo, dias_test=dias_test,
+            )
+            comparacion = comparar_modelos(train, test, modelo)
 
         with transaction.atomic():
             ModeloEntrenado.objects.filter(
@@ -124,6 +160,7 @@ class Command(BaseCommand):
                 origen_datos_internos=origen,
                 dias_entrenamiento=dias_entrenamiento,
                 dias_prueba=dias_test,
+                escalado=escalado,
                 ruta_archivo=ruta,
                 activo=True,
             )
@@ -139,6 +176,26 @@ class Command(BaseCommand):
             f'  Filas de test con demanda real cero: {comparacion["pct_demanda_cero"]:.1f}%'
         )
         self._imprimir_comparacion(comparacion)
+
+    def _niveles_externos(self, archivo):
+        if not Path(archivo).exists():
+            raise CommandError(
+                f'No se encontró el dataset externo ({archivo}), del que salen los niveles del escalado. '
+                'Indica --archivo-externo o usa --no-escalar-nivel.'
+            )
+        return niveles_externos(leer_datos_externos(archivo))
+
+    def _imprimir_escalado(self, escalado):
+        self.stdout.write(
+            f'Escalado de nivel: mínimo externo {escalado["nivel_minimo"]:.2f} u/día, referencia '
+            f'{escalado["nivel_referencia"]:.2f} u/día (factores con los días de entrenamiento).'
+        )
+        escaladas = {s: f for s, f in escalado['factores'].items() if f != 1.0}
+        if escaladas:
+            detalle = ', '.join(f'{s} ×{f:.3f}' for s, f in escaladas.items())
+            self.stdout.write(f'  Series escaladas: {detalle}. Las demás, sin escalar.')
+        else:
+            self.stdout.write('  Ninguna serie queda por debajo del mínimo externo: no se escala nada.')
 
     def _cargar_por_categoria(self, origen):
         """Lee la demanda agrupada por categoría, decide qué categorías

@@ -15,9 +15,11 @@ el futuro al pasado e inflaría las métricas.
 """
 from pathlib import Path
 
+import pandas as pd
 import xgboost as xgb
 
-from .features import COLUMNAS_FEATURES, construir_features, dividir_temporal
+from .escalado import escalar
+from .features import COLUMNAS_FEATURES, construir_features, densificar_periodo, dividir_temporal
 
 DIR_MODELOS = Path('artefactos/modelos_ml')
 
@@ -90,3 +92,26 @@ def entrenar_fase_ajuste(df_interno, ruta_modelo_base, dias_test=30):
     train, test = dividir_temporal(df_features, dias_test=dias_test)
     modelo = entrenar_modelo(train, HIPERPARAMETROS_AJUSTE, xgb_model=ruta_modelo_base)
     return modelo, train, test, HIPERPARAMETROS_AJUSTE
+
+
+def entrenar_fase_ajuste_escalado(df_interno, ruta_modelo_base, escalado, dias_test=30):
+    """Fase 2 con escalado de nivel (inventario/ml/escalado.py): los
+    factores de cada serie se calculan SOLO con los días de entrenamiento
+    (cada serie densificada a diario, con cero los días sin pedidos, igual
+    que en la validación de origen móvil), la demanda se multiplica por
+    ellos y el modelo base se ajusta sobre esa escala.
+
+    Devuelve (modelo, train, test, hiperparametros, factores, test_modelo):
+    train/test en la escala original (para las líneas base y el modelo
+    solo-interno) y test_modelo con las variables escaladas, que es lo que
+    recibe el modelo; su pronóstico se divide por el factor de la serie."""
+    serie = densificar_periodo(df_interno)
+    fecha_corte = serie['fecha'].max() - pd.Timedelta(days=dias_test - 1)
+    factores = escalado(serie[serie['fecha'] < fecha_corte])
+
+    train_modelo, test_modelo = dividir_temporal(
+        construir_features(escalar(df_interno, factores)), dias_test=dias_test,
+    )
+    modelo = entrenar_modelo(train_modelo, HIPERPARAMETROS_AJUSTE, xgb_model=ruta_modelo_base)
+    train, test = dividir_temporal(construir_features(df_interno), dias_test=dias_test)
+    return modelo, train, test, HIPERPARAMETROS_AJUSTE, factores, test_modelo

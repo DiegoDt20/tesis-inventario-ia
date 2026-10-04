@@ -78,11 +78,16 @@ def linea_base_ingenua(train, test):
     return prediccion.loc[test.index].fillna(0)
 
 
-def comparar_modelos(train_interno, test_interno, modelo_ajustado):
+def comparar_modelos(train_interno, test_interno, modelo_ajustado, test_modelo=None, factores=None):
     """Evalúa los tres modelos sobre test_interno y devuelve un dict con
     las métricas de cada uno ('linea_base', 'solo_interno' y 'ajustado') más
     'pct_demanda_cero', el porcentaje de filas de test con demanda real
-    cero (mismo test para los tres, así que el porcentaje es único)."""
+    cero (mismo test para los tres, así que el porcentaje es único).
+
+    Con escalado de nivel (entrenar_fase_ajuste_escalado), el ajustado
+    recibe test_modelo (mismas filas, variables escaladas) y su pronóstico
+    se divide por el factor de cada serie: las métricas de los tres quedan
+    en la escala original."""
     y_real = test_interno['cantidad']
 
     y_base = linea_base_ingenua(train_interno, test_interno)
@@ -92,7 +97,9 @@ def comparar_modelos(train_interno, test_interno, modelo_ajustado):
     y_solo_interno = predecir_con_modelo(modelo_solo_interno, test_interno)
     metricas_solo_interno = calcular_metricas(y_real, y_solo_interno)
 
-    y_ajustado = predecir_con_modelo(modelo_ajustado, test_interno)
+    y_ajustado = predecir_con_modelo(modelo_ajustado, test_interno if test_modelo is None else test_modelo)
+    if factores is not None:
+        y_ajustado = y_ajustado / test_interno['serie_id'].map(factores).fillna(1.0).to_numpy(dtype=float)
     metricas_ajustado = calcular_metricas(y_real, y_ajustado)
 
     return {

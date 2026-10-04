@@ -192,12 +192,64 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     orígenes); sí a la media móvil (22.8%) y al último valor (50.4%). En
     diario no supera a ninguna de las dos medias. No cambiar nada para que
     las supere: es el resultado reportado.
+  - Diagnóstico del sesgo de accesorio (`diagnostico_sesgo.py` + comando
+    `diagnosticar_sesgo --categoria --origen --archivo-externo`; reporte en
+    `artefactos/diagnostico/`). No toca datos ni activa ni registra
+    modelos. Error con signo = pronóstico − real. Criterios fijos:
+    `FRACCION_CAUSA` 0.5, `MULTIPLO_CEROS` 2. Resultado 03/10/2026:
+    accesorio +66% en la ventana (11 de 11 orígenes), +72% en diario; no
+    crece con la posición en la ventana (no viene del encadenamiento).
+    (a) **identificada, dominante**: el base #1 sin ajustar ya da +48% (73%
+    del sesgo) y tiene un piso de ~11 u/día (curva de respuesta: historial
+    constante de 0 a 10 → ~10.8). Accesorio está en 7–8 u/día y la serie
+    de Kaggle de menor nivel promedia 12.7. (b) descartada: 0 predicciones
+    recortadas. (c) descartada: 38.7% de días en cero, pero la media móvil
+    de 7 días subestima (−41%). (d) no contrastable (el modelo no ve
+    productos): 14 de 27 productos sin pedidos, ninguno en más de 3 días.
+    Corrección ADOPTADA el 03/10/2026 (escalado de nivel, `escalado.py`):
+    una serie cuya media diaria en los días de ajuste es menor que la de la
+    serie externa de menor nivel (12.73) se lleva a la mediana de las
+    medias por serie externas (50.03, calculada por `niveles_externos`, no
+    escrita a mano) antes del ajuste fino, y el pronóstico se desescala.
+    Es una regla general: el piso medido del base es 10.76 u/día y ambas
+    reglas clasifican igual (solo accesorio, 7.8–9.9 u/día). El factor usa
+    solo los días ≤ origen (tests `EscaladoSinFugaTests`) o, en
+    `entrenar_ajustado`, solo los de entrenamiento. Vigente **#6**
+    (`entrenar_ajustado --origen real --nivel categoria --dias-test 7`;
+    accesorio ×5.829; #5 inactivo). Ventana: WAPE total 20.6% → 16.4%
+    (supera a las tres líneas base; baja en 11 de 11 orígenes), accesorio
+    +66% → +31%. Diario: 50.2% → 51.2%, sigue sin superar a las medias.
+    Origen por origen contra la media por categoría (ventana): supera en
+    9 de 11 (prueba de signos bilateral p = 0.065; no significativo a 0.05,
+    y los orígenes se solapan, así que el p es optimista). El #5 superaba en
+    4 de 11. `walk_forward.prueba_signos` / `comparar_por_origen`;
+    `resumir()` lo devuelve como 'por_origen' y `evaluar_predicciones` lo
+    imprime y guarda como `comparacion_por_origen`. Lote de predicciones y
+    recomendaciones regenerado con el #6 el 03/10/2026: estados 20/31/198/26
+    (crítico/reponer/normal/exceso) contra 20/31/197/27 del #5; en accesorio
+    no cambia ningún estado, pero la cantidad sugerida baja 244.5 → 172.9.
+    Detalle en "Adopción del escalado (modelo #6)" del README.
+    - `ModeloEntrenado.escalado` (JSON, migración 0028): regla, niveles y
+      factores de entrenamiento; null = ajustado sin escalar (#5 y
+      anteriores).
+    - `entrenar_ajustado --escalar-nivel` (por defecto; `--no-escalar-nivel`
+      reproduce lo anterior; `--archivo-externo`).
+    - `predecir_demanda` aplica los factores guardados (`factor_guardado`).
+    - `evaluar_predicciones` y `diagnosticar_sesgo` evalúan el vigente con
+      su escalado: el walk-forward recalcula el factor por origen y la
+      división única usa los guardados.
+    - `optimizar_modelo` NO usa escalado: sus resultados son del
+      procedimiento del #5.
+    `predecir_recursivo(con_cruda=True)` y `ValidacionOrigenMovil(con_cruda=True)`
+    exponen la salida antes del piso en cero, solo para diagnóstico.
+    `densificar_periodo` vive ahora en `features.py` (`walk_forward` lo
+    importa de ahí).
 - Modelos `ModeloEntrenado` (métricas, hiperparámetros, fase, archivo,
   `activo`, y para la fase "ajustado" también `origen_datos_internos`,
   `dias_entrenamiento` y `dias_prueba`) y `Prediccion` (producto, fecha
   objetivo, demanda predicha/real, modelo usado).
 - Comandos: `entrenar_base`, `entrenar_ajustado`, `predecir_demanda --dias
-  N`, `evaluar_predicciones`.
+  N`, `evaluar_predicciones`, `diagnosticar_sesgo`.
 - Los archivos de modelo entrenado (`.json` de XGBoost) se guardan en
   `artefactos/modelos_ml/`, que no se versiona (`.gitignore`).
 - Dependencias añadidas: `pandas`, `numpy`, `scikit-learn`, `xgboost`.

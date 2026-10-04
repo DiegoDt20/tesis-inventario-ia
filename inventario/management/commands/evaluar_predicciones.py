@@ -13,6 +13,11 @@ ventana de lead time (suma de los días que tarda en llegar un pedido).
   .dias_prueba) con el archivo del modelo vigente, para reproducir
   resultados anteriores; solo esa corrida diaria se guarda en el modelo.
 
+Si el vigente se ajustó con escalado de nivel (ModeloEntrenado.escalado),
+se evalúa con el mismo procedimiento: en el walk-forward los factores se
+recalculan en cada origen solo con sus días de ajuste (misma regla y
+niveles guardados); en la división única se usan los factores guardados.
+
 No activa ni registra ningún modelo. El reporte va a artefactos/evaluacion/.
 """
 import argparse
@@ -31,6 +36,7 @@ from inventario.ml.carga_interna import (
     seleccionar_categorias_aptas,
 )
 from inventario.ml.entrenamiento import HIPERPARAMETROS_AJUSTE
+from inventario.ml.escalado import EscaladoNivel, escalar
 from inventario.ml.evaluacion import LINEAS_BASE, calcular_metricas, comparar_exactitud, predecir_con_modelo
 from inventario.ml.features import construir_features, dividir_temporal
 from inventario.ml.walk_forward import (
@@ -266,8 +272,14 @@ class Command(BaseCommand):
         hiperparametros = modelo.hiperparametros or HIPERPARAMETROS_AJUSTE
         regresor_base = xgb.XGBRegressor()
         regresor_base.load_model(contexto['base'].ruta_archivo)
+        configuracion = modelo.escalado
+        escalado = (
+            EscaladoNivel(configuracion['nivel_minimo'], configuracion['nivel_referencia'])
+            if configuracion else None
+        )
         validacion = ValidacionOrigenMovil(
             contexto['df'], booster_base=regresor_base.get_booster(), hiperparametros_ajuste=hiperparametros,
+            escalado=escalado,
         )
         # Se verifica todo antes de entrenar nada.
         for horizonte in horizontes.values():
@@ -281,6 +293,11 @@ class Command(BaseCommand):
             f'  Ajuste fino por origen con la configuración del vigente (#{modelo.pk}: {hiperparametros}) '
             f'sobre el modelo base #{contexto["base"].pk}, que no se reentrena. Pronóstico encadenado.'
         )
+        if escalado is not None:
+            self.stdout.write(
+                f'  Con escalado de nivel, como el vigente: factores por origen con sus días de ajuste '
+                f'(mínimo externo {escalado.nivel_minimo:.2f}, referencia {escalado.nivel_referencia:.2f} u/día).'
+            )
         contexto['hiperparametros'] = hiperparametros
 
         secciones = {}
@@ -328,10 +345,19 @@ class Command(BaseCommand):
 
         regresor = xgb.XGBRegressor()
         regresor.load_model(modelo.ruta_archivo)
+        factores = modelo.escalado['factores'] if modelo.escalado else None
         secciones = {}
         if 'diario' in horizontes:
             self.stdout.write('\nHorizonte diario, pronóstico a un paso:')
-            resultado = comparar_exactitud(train, test, predecir_con_modelo(regresor, test))
+            if factores:
+                # Variables con la demanda escalada por los factores guardados;
+                # el pronóstico vuelve a la escala original.
+                _, test_modelo = dividir_temporal(construir_features(escalar(df, factores)), dias_test=dias_test)
+                y_modelo = predecir_con_modelo(regresor, test_modelo) / test['serie_id'].astype(str).map(
+                    factores).fillna(1.0).to_numpy(dtype=float)
+            else:
+                y_modelo = predecir_con_modelo(regresor, test)
+            resultado = comparar_exactitud(train, test, y_modelo)
             tolerancia = resultado['modelo']['tolerancia_relativa']
             self._imprimir_por_categoria(resultado['modelo'], tolerancia)
             self._imprimir_comparacion(resultado, tolerancia)
@@ -351,7 +377,10 @@ class Command(BaseCommand):
                     f'La ventana de {horizonte} días desde el {origen_unico:%d/%m} pasa del último día '
                     'con datos; la división única no alcanza para evaluarla.'
                 )
-            validacion = ValidacionOrigenMovil(df, ajustar=lambda _train: regresor)
+            validacion = ValidacionOrigenMovil(
+                df, ajustar=lambda _train: regresor,
+                escalado=(lambda _historial: factores) if factores else None,
+            )
             diario = validacion.pronosticar(origen_unico, horizonte)
             ventanas = agregar_por_ventana(diario)
             resultado = resumir(ventanas)
@@ -423,6 +452,25 @@ class Command(BaseCommand):
             self.stdout.write(
                 f'  {etiqueta:<38}media {_pct(d["media"])} {_pp(d["desviacion"])} '
                 f'(mín. {_pct(d["minimo"])}, máx. {_pct(d["maximo"])}; {d["n_origenes"]} orígenes)'
+            )
+
+        if 'por_origen' in resultado and len(origenes) > 1:
+            self.stdout.write('\nOrigen por origen (WAPE total del modelo menor que el de la línea base):')
+            for clave, (etiqueta, _) in LINEAS_BASE.items():
+                c = resultado['por_origen'][clave]
+                empates = f', {c["empates"]} empate(s)' if c['empates'] else ''
+                self.stdout.write(
+                    f'  vs. {etiqueta:<38}supera en {c["gana"]} de {c["origenes"]} orígenes{empates} '
+                    f'(prueba de signos: p bilateral = {_num(c["p_bilateral"], 3)}, '
+                    f'unilateral = {_num(c["p_unilateral"], 3)})'
+                )
+            compartido = (
+                f'casi todo su histórico de ajuste y {horizonte - 1} de sus {horizonte} días pronosticados'
+                if horizonte > 1 else 'casi todo su histórico de ajuste'
+            )
+            self.stdout.write(
+                f'  Los orígenes consecutivos comparten {compartido}: no son independientes, así que el p '
+                'es orientativo y sale optimista.'
             )
 
         mejor = resultado['mejor_linea_base']
@@ -521,6 +569,7 @@ class Command(BaseCommand):
                 **{k: v for k, v in seccion.items() if k not in ('resultado', 'ventanas', 'diario')},
                 'resultados': {clave: resultado[clave] for clave in ['modelo', *LINEAS_BASE]},
                 'dispersion_entre_origenes': resultado.get('dispersion'),
+                'comparacion_por_origen': resultado.get('por_origen'),
                 'mejor_linea_base': resultado['mejor_linea_base'],
                 'modelo_supera_por_wape': resultado['supera'],
                 'ventanas': _registros(seccion['ventanas']) if 'ventanas' in seccion else None,

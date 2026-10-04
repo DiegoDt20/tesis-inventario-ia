@@ -6,6 +6,11 @@ Si el modelo activo es de nivel "categoria", predice la demanda de cada
 categoría apta y la desagrega a producto según la participación histórica
 de cada uno (inventario/ml/prediccion.py), pero sigue guardando Prediccion a
 nivel de producto para que el motor de decisiones no cambie.
+
+Si el modelo se ajustó con escalado de nivel (ModeloEntrenado.escalado), el
+historial de cada serie se multiplica por el factor guardado en el modelo
+(calculado con sus días de entrenamiento) y cada predicción se divide por
+ese mismo factor.
 """
 import pandas as pd
 import xgboost as xgb
@@ -19,6 +24,7 @@ from inventario.ml.carga_interna import (
     leer_demanda_interna_por_categoria,
     seleccionar_categorias_aptas,
 )
+from inventario.ml.escalado import factor_guardado
 from inventario.ml.features import COLUMNAS_FEATURES, construir_features
 from inventario.ml.prediccion import calcular_participacion, desagregar_prediccion_categoria
 from inventario.models import ModeloEntrenado, NivelPrediccion, Prediccion, Producto
@@ -80,7 +86,8 @@ class Command(BaseCommand):
                 producto = productos_por_id.get(serie_id)
                 if producto is None:
                     continue
-                for fecha_objetivo, valor in self._predecir_serie(historial, modelo, dias):
+                factor = factor_guardado(registro_modelo.escalado, serie_id)
+                for fecha_objetivo, valor in self._predecir_serie(historial, modelo, dias, factor):
                     Prediccion.objects.create(
                         producto=producto,
                         fecha_generacion=fecha_generacion,
@@ -121,7 +128,8 @@ class Command(BaseCommand):
         with transaction.atomic():
             for categoria in aptas:
                 historial = df_categorias[df_categorias['serie_id'] == categoria]
-                for fecha_objetivo, valor_categoria in self._predecir_serie(historial, modelo, dias):
+                factor = factor_guardado(registro_modelo.escalado, categoria)
+                for fecha_objetivo, valor_categoria in self._predecir_serie(historial, modelo, dias, factor):
                     reparto = desagregar_prediccion_categoria(categoria, valor_categoria, participacion)
                     for producto_id, valor_producto, participacion_usada in reparto:
                         producto = productos_por_id.get(producto_id)
@@ -139,13 +147,18 @@ class Command(BaseCommand):
                         creadas += 1
         return creadas
 
-    def _predecir_serie(self, historial, modelo, dias):
+    def _predecir_serie(self, historial, modelo, dias, factor=1.0):
         """Genera `dias` predicciones futuras de forma recursiva para una
         única serie (un producto o una categoría): cada predicción se
         agrega al historial como si fuera un dato real, para que la
         siguiente pueda calcular sus rezagos y medias móviles (en el futuro
-        no hay ventas reales todavía)."""
+        no hay ventas reales todavía).
+
+        Con factor != 1 (escalado de nivel) todo el encadenamiento ocurre en
+        la escala del modelo y solo el valor devuelto se divide por el
+        factor."""
         serie = historial[['fecha', 'serie_id', 'cantidad']].copy()
+        serie['cantidad'] = serie['cantidad'].astype(float) * factor
         serie_id = serie['serie_id'].iloc[0]
         ultima_fecha = serie['fecha'].max()
         resultados = []
@@ -159,7 +172,7 @@ class Command(BaseCommand):
             fila_features = features[features['fecha'] == fecha_objetivo]
 
             prediccion = max(float(modelo.predict(fila_features[COLUMNAS_FEATURES])[0]), 0.0)
-            resultados.append((fecha_objetivo.date(), prediccion))
+            resultados.append((fecha_objetivo.date(), prediccion / factor))
 
             serie = pd.concat([serie, pd.DataFrame([{
                 'fecha': fecha_objetivo, 'serie_id': serie_id, 'cantidad': prediccion,
