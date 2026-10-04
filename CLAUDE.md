@@ -229,6 +229,20 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     (crítico/reponer/normal/exceso) contra 20/31/197/27 del #5; en accesorio
     no cambia ningún estado, pero la cantidad sugerida baja 244.5 → 172.9.
     Detalle en "Adopción del escalado (modelo #6)" del README.
+  - Estudio de ablación (`ablacion.py` + comando `evaluar_ablacion
+    --origen`; reporte en `artefactos/ablacion/`; no toca datos ni
+    activa ni registra modelos). Mismo walk-forward, orígenes y filas que
+    `evaluar_predicciones`. A = base #1 "sin ajuste con datos de la
+    empresa": recibe el historial de agosto como entrada (no existe "sin
+    datos de la empresa"; no escribirlo así). A_escalado = A con la regla
+    del vigente. B = XGBoost desde cero con los hiperparámetros del ajuste
+    del #6, sin base ni escalado. C = procedimiento del #6. Resultado
+    04/10/2026, ventana: A 20.7%, A_escalado 18.5%, B 34.7% (accesorio
+    +171%), C 16.4%; medias 19.1/22.8/50.4. C gana a A y a B en 10 de 11
+    orígenes. Pero C vs. A_escalado solo gana en 7 de 11 (p = 0.549): la
+    ventaja del #6 viene sobre todo del escalado, y el ajuste fino empeora
+    accesorio (−3.8% → +31.3% de sesgo; el sesgo restante del #6 NO es del
+    historial, se corrigió el README). Diario: nada supera a las medias.
     - `ModeloEntrenado.escalado` (JSON, migración 0028): regla, niveles y
       factores de entrenamiento; null = ajustado sin escalar (#5 y
       anteriores).
@@ -249,7 +263,7 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
   `dias_entrenamiento` y `dias_prueba`) y `Prediccion` (producto, fecha
   objetivo, demanda predicha/real, modelo usado).
 - Comandos: `entrenar_base`, `entrenar_ajustado`, `predecir_demanda --dias
-  N`, `evaluar_predicciones`, `diagnosticar_sesgo`.
+  N`, `evaluar_predicciones`, `diagnosticar_sesgo`, `evaluar_ablacion`.
 - Los archivos de modelo entrenado (`.json` de XGBoost) se guardan en
   `artefactos/modelos_ml/`, que no se versiona (`.gitignore`).
 - Dependencias añadidas: `pandas`, `numpy`, `scikit-learn`, `xgboost`.

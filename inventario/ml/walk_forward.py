@@ -234,13 +234,13 @@ class ValidacionOrigenMovil:
         return agregar_por_ventana(diario), diario
 
 
-def agregar_por_ventana(diario):
+def agregar_por_ventana(diario, metodos=METODOS):
     """Suma real y pronósticos de cada origen y categoría sobre los días de
     su horizonte: una fila por ventana (origen, categoria, fecha_inicio,
-    fecha_fin, dias, real y una columna por método)."""
+    fecha_fin, dias, real y una columna por método de `metodos`)."""
     agregado = diario.groupby(['origen', 'categoria'], sort=True).agg(
         fecha_inicio=('fecha', 'min'), fecha_fin=('fecha', 'max'), dias=('fecha', 'count'),
-        real=('real', 'sum'), **{clave: (clave, 'sum') for clave in METODOS if clave in diario},
+        real=('real', 'sum'), **{clave: (clave, 'sum') for clave in metodos if clave in diario},
     )
     return agregado.reset_index()
 

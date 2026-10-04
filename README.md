@@ -201,6 +201,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `predecir_demanda`       | Genera predicciones de demanda diaria con el modelo ajustado activo (o el base si aún no hay ajustado).              | `--dias` (30), `--origen` (opcional)                                          |
 | `evaluar_predicciones`   | Completa `demanda_real` en predicciones ya vencidas (solo con pedidos del origen y hasta el último día con pedidos de ese origen) y calcula MAE, RMSE, SMAPE y R². Además evalúa la exactitud del modelo ajustado vigente contra tres líneas base, en horizonte diario y de ventana de lead time, con validación de origen móvil (o la división única de antes con `--no-walk-forward`). **No activa ni registra ningún modelo**; guarda el reporte en `artefactos/evaluacion/` (y la división única diaria, también en el vigente). Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `--origen` (`real`), `--horizonte diario\|ventana\|ambos` (`ambos`), `--walk-forward`/`--no-walk-forward` (activado) |
 | `diagnosticar_sesgo`     | Diagnostica el sesgo sistemático del pronóstico en una categoría: lo caracteriza (signo, orígenes, posición en la ventana), contrasta cuatro hipótesis con una medición y un criterio fijo cada una y, solo si la causa dominante es el modelo base, evalúa el escalado de nivel antes del ajuste fino con el mismo walk-forward. **No toca datos ni activa ni registra modelos**; reporte en `artefactos/diagnostico/`. Ver [Diagnóstico del sesgo de accesorio](#diagnóstico-del-sesgo-de-accesorio). | `--categoria` (`accesorio`), `--origen` (`real`), `--archivo-externo` (`datos/train.csv`) |
+| `evaluar_ablacion`       | Estudio de ablación de las fuentes de datos: base sin ajuste con datos de la empresa (con y sin escalado), solo datos internos y el procedimiento del vigente, con las tres líneas base, sobre la misma validación de origen móvil; comparación por origen con prueba de signos y lectura de las tres preguntas. **No toca datos ni activa ni registra modelos**; reporte en `artefactos/ablacion/`. Ver [Estudio de ablación](#estudio-de-ablación). | `--origen` (`real`) |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
 | `indexar_conocimiento`   | Regenera el índice del asistente conversacional (borra y reconstruye `DocumentoIndexado`).                           | —                                                                              |
 | `recalcular_stock`       | Recalcula `stock_actual` de todos los productos a partir del historial de `Movimiento`.                              | —                                                                              |
@@ -750,10 +751,12 @@ los mismos orígenes y las mismas líneas base.
   del comando, solo para medir el ruido): antes 19.5–20.7%, después
   15.3–17.0%. La mejora no es ruido de semilla.
 - **Lo que no arregla:** accesorio sigue sobreestimado (+31%) y sigue peor
-  que la media por categoría (32.8% vs. 24.2%). Parte del sesgo restante es
-  de los datos: accesorio vendió 16 u/día en la primera semana de agosto y
-  entre 3.7 y 6.6 después, así que cualquier método que use el nivel del
-  historial sobreestima (la media por categoría también: +14.6%).
+  que la media por categoría (32.8% vs. 24.2%). *Corrección (04/10/2026,
+  [Estudio de ablación](#estudio-de-ablación)):* acá se atribuía parte de
+  ese sesgo al cambio de nivel de agosto (16 u/día la primera semana, 3.7
+  a 6.6 después). La ablación lo desmiente. El base escalado SIN ajuste
+  fino, con el mismo historial, deja accesorio en −3.8%: el +31% restante
+  lo introduce el ajuste fino.
 - **Efecto en las otras categorías:** sus datos de ajuste no cambian (lo
   verifica un test), pero el ajuste fino es conjunto (árboles compartidos)
   y sus pronósticos se mueven. Látex mejora (20.3% → 16.3%, 9 de 11
@@ -872,8 +875,9 @@ Coincide exactamente con el "después" del diagnóstico.
   −5.7% → 6.0%. Con 21 filas no hay diferencia que leer. Esa corrida es
   la que queda guardada en los campos de evaluación del #6.
 - **Accesorio sigue sobreestimado** (+31% en la ventana) y sigue peor que
-  la media por categoría. El sesgo restante viene en parte del cambio de
-  nivel de agosto (16 u/día la primera semana, 4–7 después).
+  la media por categoría. Ese sesgo lo introduce el ajuste fino: el base
+  escalado sin ajuste deja accesorio en −3.8% (ver
+  [Estudio de ablación](#estudio-de-ablación)).
 - `optimizar_modelo` sigue evaluando el procedimiento sin escalado. Sus
   resultados son del #5.
 
@@ -926,6 +930,127 @@ de `ModeloEntrenado`.
 Con 21 filas el modelo no superaba a la media móvil ni a la media por
 categoría. El R² global de 0.40 se explicaba por la diferencia de nivel
 entre categorías: dentro de cada una el R² era negativo.
+
+## Estudio de ablación
+
+¿Funciona el modelo sin los datos de la empresa (solo con Kaggle)? ¿Cuánto
+cambia al incorporar agosto? Comando `evaluar_ablacion`
+(`inventario/ml/ablacion.py`). Corrida del 04/10/2026
+(`artefactos/ablacion/ablacion_20261004_051044.json`), datos reales de
+agosto, sobre **la misma validación de origen móvil que
+`evaluar_predicciones`**: mismos orígenes, mismas filas y mismos horizontes
+(lo verifican los tests). No toca datos ni activa ni registra modelos.
+
+**Precisión: "sin datos de la empresa" no es posible en sentido estricto.**
+Aunque el modelo no se entrene con agosto, para pronosticar necesita los
+rezagos y medias móviles de los días previos de la propia serie, y esos
+días son de agosto. No se puede pronosticar una serie sin su historial. La
+configuración A se llama por eso **"sin ajuste con datos de la empresa"**:
+el modelo base no se reentrena con agosto, pero recibe el historial de
+agosto hasta cada origen como entrada.
+
+**Configuraciones** (incluido el escalado, fijadas antes de correr):
+
+| | Qué es | Escalado |
+|---|---|---|
+| **A** | Solo externo: el base #1 (Kaggle) tal cual, sin ajuste. | No |
+| **A esc.** | Igual que A, con la regla de escalado del vigente (mínimo 12.73, referencia 50.03 u/día; factores con los días ≤ origen). Mide el piso del base sobre datos reales. | Sí |
+| **B** | Solo interno: XGBoost desde cero con los días ≤ origen, sin el base, con los hiperparámetros del ajuste fino del #6 (50 árboles, learning rate 0.01, profundidad 6). | No: no hay nivel externo que igualar |
+| **C** | Externo + interno: el procedimiento del #6 (ajuste fino del base con los días ≤ origen). | Sí |
+
+Más las tres líneas base. Nota sobre B, dejada por escrito antes de
+correr: XGBoost 3.4 parte de la media global del objetivo (todas las
+categorías juntas). Con 50 árboles y learning rate 0.01, desde cero solo
+puede recorrer una parte del camino hacia el nivel de cada categoría
+(cota ≈ 1 − 0.99⁵⁰ ≈ 39%). Es consecuencia de usar la misma configuración
+que C, como pide la ablación: no se ajustó para que compita mejor ni peor.
+
+**Ventana de lead time (H = 7, suma): 11 orígenes (14/08–24/08).** WAPE por
+categoría con el sesgo relativo entre paréntesis (Σ(pron. − real) / Σ
+real). El R² intra-categoría está en la salida del comando y en el
+reporte.
+
+| Configuración | Accesorio | Esmalte | Látex | WAPE total | Exactitud | Acierto ±20% | R² global | Desv. WAPE | Sesgo total |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| A. Solo externo | 48.4% (+48.4%) | 16.0% (+9.6%) | 19.7% (−19.2%) | 20.7% | 79.3% | 48.5% | 0.797 | ±4.0 pp | +1.4% |
+| A. Solo externo, con escalado | 26.4% (−3.8%) | 16.0% (+9.6%) | 19.7% (−19.2%) | 18.5% | 81.5% | 54.5% | 0.817 | ±3.2 pp | −3.7% |
+| B. Solo interno | 171.2% (+171.2%) | 20.0% (−20.0%) | 20.0% (−19.6%) | 34.7% | 65.3% | 36.4% | 0.429 | ±9.4 pp | −1.2% |
+| **C. Externo + interno (#6)** | 32.8% (+31.3%) | 13.2% (+7.2%) | 16.3% (−13.7%) | **16.4%** | 83.6% | 63.6% | 0.859 | ±4.7 pp | +0.8% |
+| Media por categoría | 24.2% (+14.6%) | 12.1% (+6.4%) | 26.0% (−26.0%) | 19.1% | 80.9% | 48.5% | 0.793 | ±4.0 pp | −6.3% |
+| Media móvil 7 días | 57.9% (−41.1%) | 21.3% (+10.3%) | 16.3% (−12.1%) | 22.8% | 77.2% | 39.4% | 0.730 | ±7.6 pp | −4.0% |
+| Último valor | 107.8% (−19.2%) | 45.9% (+16.0%) | 42.2% (−3.7%) | 50.4% | 49.6% | 18.2% | −0.630 | ±27.3 pp | +4.3% |
+
+**Diario (H = 1): 17 orígenes (14/08–30/08).**
+
+| Configuración | Accesorio | Esmalte | Látex | WAPE total | Exactitud | Acierto ±20% | R² global | Desv. WAPE | Sesgo total |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| A. Solo externo | 111.1% (+61.5%) | 50.0% (+5.4%) | 38.8% (−17.7%) | 50.6% | 49.4% | 11.8% | 0.343 | ±18.3 pp | +0.5% |
+| A. Solo externo, con escalado | 100.7% (+5.1%) | 50.0% (+5.4%) | 38.8% (−17.7%) | 49.7% | 50.3% | 9.8% | 0.353 | ±19.3 pp | −4.5% |
+| B. Solo interno | 194.4% (+188.8%) | 46.7% (−23.3%) | 40.6% (−22.1%) | 57.2% | 42.8% | 17.6% | 0.176 | ±20.4 pp | −4.0% |
+| **C. Externo + interno (#6)** | 103.0% (+23.8%) | 50.7% (+7.6%) | 41.0% (−14.6%) | 51.2% | 48.8% | 15.7% | 0.338 | ±18.1 pp | −0.4% |
+| Media por categoría | 101.7% (+21.0%) | 45.0% (+3.0%) | 41.1% (−26.0%) | 48.4% | 51.6% | 27.5% | 0.358 | ±22.5 pp | −7.7% |
+| Media móvil 7 días | 97.5% (−23.1%) | 47.9% (+3.3%) | 38.4% (−11.2%) | 48.2% | 51.8% | 17.6% | 0.365 | ±20.9 pp | −5.2% |
+| Último valor | 145.5% (−8.3%) | 63.7% (+6.3%) | 50.8% (−2.6%) | 65.4% | 34.6% | 19.6% | −0.188 | ±35.3 pp | +1.2% |
+
+**Comparación origen por origen** (WAPE total de cada origen; prueba de
+signos exacta, p bilateral). Los orígenes consecutivos se solapan:
+comparten casi todo el histórico de ajuste y, en la ventana, 6 de sus 7
+días pronosticados. **Los p indican consistencia, no son prueba de
+significancia.**
+
+| Comparación | Qué mide | Ventana: gana en | p | Diario: gana en | p |
+|---|---|---:|---:|---:|---:|
+| C vs. A | aporte del ajuste con datos de la empresa (y del escalado) | 10 de 11 | 0.012 | 9 de 17 | 1.000 |
+| C vs. A esc. | aporte del ajuste con datos de la empresa (ambos escalados) | 7 de 11 | 0.549 | 6 de 17 | 0.332 |
+| C vs. B | aporte de la transferencia desde Kaggle | 10 de 11 | 0.012 | 11 de 17 | 0.332 |
+| A vs. B | cuál fuente sola rinde mejor | 10 de 11 | 0.012 | 12 de 17 | 0.143 |
+| A esc. vs. A | efecto del escalado sobre el base sin ajuste | 9 de 11 | 0.065 | 11 de 17 | 0.332 |
+| A vs. media por categoría | | 4 de 11 | 0.549 | 8 de 17 | 1.000 |
+| A esc. vs. media por categoría | | 5 de 11 | 1.000 | 6 de 17 | 0.332 |
+| B vs. media por categoría | | 0 de 11 | 0.001 | 6 de 17 | 0.332 |
+| C vs. media por categoría | | 9 de 11 | 0.065 | 6 de 17 | 0.332 |
+
+**Lectura.** El criterio es el fijado en la evaluación de la ventana: una
+configuración "funciona" si su WAPE total en la ventana es menor que el de
+las tres líneas base.
+
+1. **¿Funciona sin ajuste con datos de la empresa (A)? No.** WAPE ventana
+   20.7% contra 19.1% de la media por categoría; le gana solo en 4 de 11
+   orígenes. **Con escalado, sí en el agregado** (18.5% < 19.1%), pero
+   solo en 5 de 11 orígenes (p = 1.000): no es una mejora consistente.
+   En diario, ninguna de las dos supera a las medias.
+2. **¿Funciona sin la transferencia desde Kaggle (B)? No.** WAPE ventana
+   34.7%; pierde contra la media por categoría en los 11 orígenes. El
+   problema es accesorio (+171%): partiendo de la media global, B no
+   alcanza a bajar al nivel de una categoría de 7–8 u/día. Es el
+   resultado con la configuración del ajuste fino, que no está pensada
+   para entrenar desde cero.
+3. **¿La combinación (C) supera a cada fuente por separado? Sí, a las dos,
+   en la ventana:** contra A gana en 10 de 11 orígenes (16.4% vs. 20.7%) y
+   contra B también en 10 de 11 (16.4% vs. 34.7%). Es la única
+   configuración que supera a las tres líneas base y la única consistente
+   contra la media por categoría (9 de 11).
+
+**Lo que esto cambia en lo que la tesis puede afirmar.**
+
+- La ventaja de C sobre A es, sobre todo, **del escalado de nivel y no del
+  ajuste con datos de la empresa**. Con el escalado aplicado a los dos
+  (C vs. A esc.), el ajuste fino baja el WAPE total de 18.5% a 16.4%, pero
+  gana solo en 7 de 11 orígenes (p = 0.549). Por categoría, el ajuste
+  fino mejora esmalte (16.0% → 13.2%) y látex (19.7% → 16.3%) y **empeora
+  accesorio** (26.4% → 32.8%; sesgo −3.8% → +31.3%). El sesgo que le queda
+  al #6 en accesorio lo introduce el ajuste fino; no viene del historial
+  (se corrigió la atribución anterior).
+- La transferencia sí aporta frente a entrenar solo con agosto (C y A
+  superan a B en 10 de 11 orígenes). Con 24–30 días internos y esta
+  configuración, sin el base el modelo no llega al nivel de las series
+  bajas.
+- Lo que se puede escribir: "el modelo base preentrenado, con el nivel de
+  cada serie igualado al del dataset externo, ya rinde como la mejor línea
+  base. El ajuste con datos de la empresa mejora el agregado en la ventana
+  de lead time (16.4% vs. 18.5%), pero no de forma consistente entre
+  orígenes."
+- El horizonte diario no distingue a ninguna configuración de las medias.
 
 ## Limitaciones
 
