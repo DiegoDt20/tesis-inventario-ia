@@ -52,6 +52,7 @@ class Command(BaseCommand):
 
             registro = ModeloEntrenado.objects.create(
                 fase=ModeloEntrenado.Fase.BASE,
+                conjunto_medicion=ModeloEntrenado.ConjuntoMedicion.EXTERNO,
                 algoritmo='XGBRegressor',
                 hiperparametros=hiperparametros,
                 mae=metricas['mae'],

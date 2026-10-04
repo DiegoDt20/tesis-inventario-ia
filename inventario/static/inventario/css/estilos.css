@@ -1431,6 +1431,25 @@ a.buscador-fila:hover {
     color: var(--texto);
 }
 
+/* Tablas de métricas de /modelo/: más aire entre columnas numéricas y
+   cabeceras que se parten en dos líneas en vez de ensanchar la tabla
+   (si aun así no cabe, la plantilla parte la tabla por horizonte). */
+.tabla-metricas > :not(caption) > * > * {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+}
+
+.tabla-compacta.tabla-metricas thead th {
+    white-space: normal;
+    vertical-align: bottom;
+}
+
+.tabla-metricas .text-end,
+.tabla-metricas > tbody > tr > td:first-child,
+.celda-estado .badge-suave {
+    white-space: nowrap;
+}
+
 .tabla-compacta.table-striped > tbody > tr:nth-of-type(odd) > * {
     --bs-table-accent-bg: var(--superficie-hundida);
 }
@@ -2193,4 +2212,215 @@ tr.htmx-swapping,
 
 .resumen-estado {
     font-size: 0.9rem;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* /modelo/: resumen para el dueño y detalle técnico plegado.          */
+/* ------------------------------------------------------------------ */
+
+.resumen-etiqueta {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--texto-tenue);
+}
+
+/* El número es el elemento dominante de la pantalla. */
+.resumen-numero {
+    font-family: var(--fuente-display);
+    font-size: clamp(3.5rem, 7vw, 5.5rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--tinta);
+    font-variant-numeric: tabular-nums;
+    margin: 0.35rem 0 0.75rem;
+}
+
+.resumen-frase {
+    font-size: 1.05rem;
+}
+
+.semaforo-verde { --semaforo-color: var(--pigmento-verde); }
+.semaforo-ambar { --semaforo-color: var(--pigmento-naranja); }
+.semaforo-rojo { --semaforo-color: var(--pigmento-rojo); }
+
+.semaforo-punto {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background-color: var(--semaforo-color);
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
+
+/* Barras de exactitud por categoría (sin degradados ni sombras). */
+.barra-categoria + .barra-categoria {
+    margin-top: 0.85rem;
+}
+
+.barra-categoria-cabecera {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.3rem;
+}
+
+.barra-categoria-nombre {
+    display: inline-flex;
+    align-items: center;
+    font-weight: 600;
+}
+
+.barra-categoria-valor {
+    font-family: var(--fuente-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 1.15rem;
+}
+
+.barra-categoria-pista {
+    height: 0.9rem;
+    border-radius: 999px;
+    background-color: var(--superficie-hundida);
+    border: 1px solid var(--linea);
+    overflow: hidden;
+}
+
+.barra-categoria-relleno {
+    height: 100%;
+    border-radius: 999px;
+    background-color: var(--semaforo-color);
+}
+
+/* Gráfico de pronóstico contra venta real, uno por categoría. */
+.grafico-ventanas-cabecera {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+}
+
+.grafico-ventanas-titulo {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+
+.lienzo-grafico-ventanas {
+    position: relative;
+    height: 190px;
+}
+
+.leyenda-real,
+.leyenda-pronostico {
+    display: inline-block;
+    width: 1.4rem;
+    height: 0;
+    border-top: 2px solid var(--texto);
+}
+
+.leyenda-pronostico {
+    border-top: 2px dashed var(--acento);
+}
+
+/* Barra del detalle técnico: una sección propia, no un separador. */
+.detalle-tecnico {
+    margin-bottom: var(--espacio-4);
+}
+
+.detalle-tecnico > summary {
+    list-style: none;
+}
+
+.detalle-tecnico > summary::-webkit-details-marker {
+    display: none;
+}
+
+.detalle-tecnico-encabezado {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    cursor: pointer;
+    padding: 1.15rem 1.35rem;
+    border: 1px solid var(--linea-fuerte);
+    border-radius: var(--radio-borde);
+    background-color: var(--superficie);
+    box-shadow: var(--sombra-tarjeta);
+    transition: border-color var(--transicion-base);
+}
+
+.detalle-tecnico-encabezado:hover {
+    border-color: var(--acento);
+}
+
+.detalle-tecnico-encabezado:focus-visible {
+    outline: none;
+    box-shadow: var(--glow-acento);
+}
+
+.detalle-tecnico-icono {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: var(--radio-borde-sm);
+    background-color: var(--acento-claro);
+    color: var(--acento);
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.detalle-tecnico-textos {
+    flex-grow: 1;
+}
+
+.detalle-tecnico-titulo {
+    display: block;
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.detalle-tecnico-subtitulo {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--texto-tenue);
+}
+
+.detalle-tecnico-accion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--acento);
+    white-space: nowrap;
+}
+
+.detalle-tecnico-accion-cerrar,
+.detalle-tecnico[open] .detalle-tecnico-accion-abrir {
+    display: none;
+}
+
+.detalle-tecnico[open] .detalle-tecnico-accion-cerrar {
+    display: inline;
+}
+
+.detalle-tecnico-chevron {
+    transition: transform var(--transicion-base);
+}
+
+.detalle-tecnico[open] .detalle-tecnico-chevron {
+    transform: rotate(180deg);
+}
+
+.detalle-tecnico-contenido {
+    padding-top: var(--espacio-4);
 }

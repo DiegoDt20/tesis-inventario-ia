@@ -140,6 +140,7 @@ class Command(BaseCommand):
 
             registro = ModeloEntrenado.objects.create(
                 fase=ModeloEntrenado.Fase.AJUSTADO,
+                conjunto_medicion=ModeloEntrenado.ConjuntoMedicion.INTERNO,
                 nivel=nivel,
                 algoritmo='XGBRegressor',
                 hiperparametros=hiperparametros,

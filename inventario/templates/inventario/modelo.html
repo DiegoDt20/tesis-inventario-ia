@@ -1,79 +1,272 @@
 {% extends 'base.html' %}
+{% load inventario_extras %}
 
 {% block titulo %}Modelo de predicción{% endblock %}
 
 {% block contenido %}
 <h1 class="titulo-pantalla"><i class="bi bi-cpu me-2"></i>Modelo de predicción de demanda</h1>
-<p class="titulo-pantalla-detalle">
-    Estado del modelo activo, comparación de los tres modelos y el historial completo de entrenamientos —
-    documentación técnica de la investigación, no la vista operativa del día a día.
-</p>
 
+{# --- Resumen para el dueño: sin jerga, con peso visual ------------------- #}
+<div class="card mb-3 resumen-pronostico">
+    <div class="card-body">
+        {% if resumen %}
+            <div class="row g-4 align-items-center">
+                <div class="col-lg-5">
+                    <div class="resumen-etiqueta">Exactitud del pronóstico</div>
+                    <div class="resumen-numero">{{ resumen.exactitud|porcentaje }}</div>
+                    <p class="resumen-frase mb-2">{{ resumen.frase }}</p>
+                    <p class="text-muted mb-0">
+                        El sistema usa este pronóstico para calcular cuánto reponer durante los
+                        {{ resumen.horizonte_dias }} días que tarda en llegar un pedido al proveedor.
+                    </p>
+                </div>
+                <div class="col-lg-7">
+                    <div class="resumen-etiqueta mb-2">Por categoría</div>
+                    {% for c in resumen.categorias %}
+                        <div class="barra-categoria semaforo-{{ c.color }}">
+                            <div class="barra-categoria-cabecera">
+                                <span class="barra-categoria-nombre">
+                                    <span class="semaforo-punto" aria-hidden="true"></span>{{ c.nombre }}
+                                </span>
+                                <span class="barra-categoria-valor">{{ c.exactitud|porcentaje }}</span>
+                            </div>
+                            <div class="barra-categoria-pista" role="img"
+                                 aria-label="{{ c.nombre }}: {{ c.exactitud|porcentaje }} ({% if c.color == 'verde' %}verde{% elif c.color == 'ambar' %}ámbar{% else %}rojo{% endif %})">
+                                <div class="barra-categoria-relleno" style="width: {{ c.ancho_barra }}%;"></div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                    <p class="text-muted small mt-2 mb-0">
+                        Verde desde 80&nbsp;%, ámbar entre 60&nbsp;% y 80&nbsp;%, rojo por debajo de 60&nbsp;%.
+                    </p>
+                </div>
+            </div>
+            {% if resumen.advertencia %}
+                <div class="alert alert-warning mt-3 mb-0 py-2 advertencia-resumen">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>{{ resumen.advertencia }}
+                </div>
+            {% endif %}
+        {% elif evaluacion and not evaluacion.coincide %}
+            <div class="resumen-etiqueta">Exactitud del pronóstico</div>
+            <p class="mb-0 aviso-sin-evaluacion">
+                La evaluación guardada es de un modelo anterior (#{{ evaluacion.modelo }}), no del que está en uso.
+                Falta evaluar el modelo actual: corre <code>python manage.py evaluar_predicciones</code>.
+            </p>
+        {% else %}
+            <div class="resumen-etiqueta">Exactitud del pronóstico</div>
+            <p class="mb-0 aviso-sin-evaluacion">
+                Todavía no se generó la evaluación del pronóstico. Corre
+                <code>python manage.py evaluar_predicciones</code>.
+            </p>
+        {% endif %}
+    </div>
+</div>
+
+{% if resumen and resumen.grafico %}
+    {# Pronóstico contra venta real: un gráfico por categoría (volúmenes muy distintos, cada uno con su eje). #}
+    <div class="card mb-3 grafico-ventanas">
+        <div class="card-body">
+            <div class="grafico-ventanas-cabecera">
+                <h6 class="card-title mb-0">¿El pronóstico sigue a la venta real?</h6>
+                <div class="grafico-leyenda-corte mt-0">
+                    <span class="grafico-leyenda-item"><span class="leyenda-real"></span> Venta real</span>
+                    <span class="grafico-leyenda-item"><span class="leyenda-pronostico"></span> Pronóstico</span>
+                </div>
+            </div>
+            <div class="row g-3 mt-0">
+                {% for serie in resumen.grafico %}
+                    <div class="col-lg-4">
+                        <div class="grafico-ventanas-titulo semaforo-{{ serie.color }}">
+                            <span class="semaforo-punto" aria-hidden="true"></span>{{ serie.nombre }}
+                        </div>
+                        <div class="lienzo-grafico-ventanas">
+                            <canvas id="{{ serie.id }}" role="img"
+                                    aria-label="Venta real y pronóstico de {{ serie.nombre }} en cada ventana de {{ resumen.horizonte_dias }} días"></canvas>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+                Cada punto suma la venta de {{ resumen.horizonte_dias }} días a partir de la fecha indicada: la línea
+                continua es lo que realmente se vendió y la punteada lo que el sistema había pronosticado antes de que
+                empezaran esos días. Las ventanas se solapan (cada una empieza un día después que la anterior).
+            </p>
+            {{ resumen.grafico|json_script:"datos-grafico-ventanas" }}
+            <script>
+                (function () {
+                    // Mismo patrón que los gráficos del dashboard: colores
+                    // leídos de las variables CSS del tema activo y registro
+                    // en window.__graficosDibujar para volver a dibujar al
+                    // cambiar de tema claro/oscuro. Los datos vienen tal cual
+                    // del reporte de evaluación (no se recalculan).
+                    function dibujar() {
+                        const series = JSON.parse(document.getElementById('datos-grafico-ventanas').textContent);
+                        const estilos = getComputedStyle(document.documentElement);
+                        const colorReal = estilos.getPropertyValue('--texto').trim();
+                        const colorPronostico = estilos.getPropertyValue('--acento').trim();
+                        const colorTexto = estilos.getPropertyValue('--texto-tenue').trim();
+                        const colorGrilla = estilos.getPropertyValue('--linea').trim();
+                        const colorMarca = estilos.getPropertyValue('--marca').trim();
+                        Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+                        Chart.defaults.font.size = 11;
+                        Chart.defaults.color = colorTexto;
+
+                        series.forEach(function (serie) {
+                            const lienzo = document.getElementById(serie.id);
+                            if (!lienzo) {
+                                return;
+                            }
+                            const anterior = Chart.getChart(lienzo);
+                            if (anterior) {
+                                anterior.destroy();
+                            }
+                            const etiquetas = serie.puntos.map(function (p) {
+                                const partes = p.fecha.split('-');
+                                return partes[2] + '/' + partes[1];
+                            });
+                            new Chart(lienzo, {
+                                type: 'line',
+                                data: {
+                                    labels: etiquetas,
+                                    datasets: [
+                                        {
+                                            label: 'Venta real',
+                                            data: serie.puntos.map(function (p) { return p.real; }),
+                                            borderColor: colorReal,
+                                            backgroundColor: colorReal,
+                                            borderWidth: 2,
+                                            pointRadius: 3,
+                                            pointStyle: 'circle',
+                                            tension: 0,
+                                        },
+                                        {
+                                            label: 'Pronóstico',
+                                            data: serie.puntos.map(function (p) { return p.pronostico; }),
+                                            borderColor: colorPronostico,
+                                            backgroundColor: colorPronostico,
+                                            borderDash: [6, 4],
+                                            borderWidth: 2,
+                                            pointRadius: 3,
+                                            pointStyle: 'triangle',
+                                            tension: 0,
+                                        },
+                                    ],
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    animation: false,
+                                    interaction: {mode: 'index', intersect: false},
+                                    plugins: {
+                                        legend: {display: false},
+                                        tooltip: {
+                                            backgroundColor: colorMarca,
+                                            titleColor: '#fff',
+                                            bodyColor: 'rgba(255, 255, 255, 0.85)',
+                                            padding: 8,
+                                            cornerRadius: 8,
+                                            callbacks: {
+                                                title: function (items) { return 'Desde el ' + items[0].label; },
+                                                label: function (item) {
+                                                    return item.dataset.label + ': ' + Math.round(item.parsed.y) + ' u';
+                                                },
+                                            },
+                                        },
+                                    },
+                                    scales: {
+                                        x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 6, maxRotation: 0}},
+                                        y: {
+                                            beginAtZero: true,
+                                            border: {display: false},
+                                            grid: {color: colorGrilla},
+                                            ticks: {maxTicksLimit: 5},
+                                            title: {display: true, text: 'unidades'},
+                                        },
+                                    },
+                                },
+                            });
+                        });
+                    }
+
+                    window.__graficosDibujar = window.__graficosDibujar || {};
+                    window.__graficosDibujar['grafico-ventanas'] = dibujar;
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(dibujar);
+                    });
+                })();
+            </script>
+        </div>
+    </div>
+{% endif %}
+
+{# --- Detalle técnico: plegado, cerrado en cada visita ------------------- #}
+<details class="detalle-tecnico"{% if detalle_abierto %} open{% endif %}>
+<summary class="detalle-tecnico-encabezado">
+    <span class="detalle-tecnico-icono" aria-hidden="true"><i class="bi bi-journal-text"></i></span>
+    <span class="detalle-tecnico-textos">
+        <span class="detalle-tecnico-titulo">Detalle técnico de la investigación</span>
+        <span class="detalle-tecnico-subtitulo">
+            Evaluación completa, comparación con métodos simples y estudio de ablación. Pensado para la
+            documentación de la tesis.
+        </span>
+    </span>
+    <span class="detalle-tecnico-accion">
+        <span class="detalle-tecnico-accion-abrir">Ver detalle</span>
+        <span class="detalle-tecnico-accion-cerrar">Ocultar detalle</span>
+        <i class="bi bi-chevron-down detalle-tecnico-chevron" aria-hidden="true"></i>
+    </span>
+</summary>
+<div class="detalle-tecnico-contenido">
+
+{# --- Modelos vigentes: cumplen funciones distintas ----------------------- #}
 <div class="row g-3 mb-4">
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-body">
-                <h6 class="card-title"><i class="bi bi-cpu me-1"></i> Modelo activo</h6>
-                {% if estado_modelo.modelo %}
+                <h6 class="card-title">
+                    <i class="bi bi-cpu me-1"></i> Modelo en producción
+                    <span class="badge-suave badge-suave-success ms-1"><i class="bi bi-broadcast"></i> En producción</span>
+                </h6>
+                {% if produccion %}
+                    <p class="text-muted small mb-2">Genera los pronósticos que usa el motor de decisiones.</p>
                     <dl class="row mb-0 small">
-                        <dt class="col-6">Método</dt>
-                        <dd class="col-6">
-                            {{ estado_modelo.modelo.algoritmo }}
-                            ({{ estado_modelo.modelo.get_fase_display }})
-                        </dd>
+                        <dt class="col-6">Modelo</dt>
+                        <dd class="col-6">#{{ produccion.pk }} — {{ produccion.algoritmo }} ({{ produccion.get_fase_display }})</dd>
 
                         <dt class="col-6">Nivel</dt>
-                        <dd class="col-6">{{ estado_modelo.modelo.get_nivel_display }}</dd>
+                        <dd class="col-6">{{ produccion.get_nivel_display }}</dd>
 
                         <dt class="col-6">Entrenado el</dt>
-                        <dd class="col-6">{{ estado_modelo.modelo.fecha_entrenamiento|date:'d/m/Y H:i' }}</dd>
+                        <dd class="col-6">{{ produccion.fecha_entrenamiento|date:'d/m/Y H:i' }}</dd>
 
-                        <dt class="col-6">MAE / RMSE</dt>
+                        <dt class="col-6">Parte del base</dt>
+                        <dd class="col-6">{% if base %}#{{ base.pk }} (Kaggle){% else %}<span class="text-muted">Sin base activo</span>{% endif %}</dd>
+
+                        <dt class="col-6">Origen de los datos de ajuste</dt>
                         <dd class="col-6">
-                            {{ estado_modelo.modelo.mae|floatformat:2 }} /
-                            {{ estado_modelo.modelo.rmse|floatformat:2 }}
+                            {% if produccion.origen_datos_internos %}{{ produccion.get_origen_datos_internos_display }}{% else %}<span class="text-muted">No registrado</span>{% endif %}
                         </dd>
 
-                        <dt class="col-6">SMAPE / R²</dt>
+                        <dt class="col-6">Días de entrenamiento / prueba</dt>
                         <dd class="col-6">
-                            {{ estado_modelo.modelo.smape|floatformat:4 }} /
-                            {{ estado_modelo.modelo.r2|floatformat:4 }}
+                            {% if produccion.dias_entrenamiento is not None %}{{ produccion.dias_entrenamiento }} / {{ produccion.dias_prueba }} días{% else %}<span class="text-muted">No registrado</span>{% endif %}
                         </dd>
 
                         <dt class="col-6">Días de histórico interno</dt>
+                        <dd class="col-6">{% if dias_historico %}{{ dias_historico }} días{% else %}Sin datos{% endif %}</dd>
+
+                        <dt class="col-6">Escalado de nivel</dt>
                         <dd class="col-6">
-                            {% if estado_modelo.dias_historico %}{{ estado_modelo.dias_historico }} días{% else %}Sin datos{% endif %}
+                            {% if produccion.escalado %}
+                                {% for serie, factor in series_escaladas.items %}{{ serie }} ×{{ factor|floatformat:3 }}{% if not forloop.last %}, {% endif %}{% empty %}Ninguna serie escalada{% endfor %}
+                                <div class="text-muted">Mínimo externo {{ produccion.escalado.nivel_minimo|floatformat:2 }} u/día → referencia {{ produccion.escalado.nivel_referencia|floatformat:2 }} u/día</div>
+                            {% else %}
+                                <span class="text-muted">Sin escalado</span>
+                            {% endif %}
                         </dd>
-
-                        {% if estado_modelo.modelo.fase == 'ajustado' %}
-                            <dt class="col-6">Origen de los datos de ajuste</dt>
-                            <dd class="col-6">
-                                {% if estado_modelo.modelo.origen_datos_internos %}
-                                    {{ estado_modelo.modelo.get_origen_datos_internos_display }}
-                                {% else %}
-                                    <span class="text-muted">No registrado</span>
-                                {% endif %}
-                            </dd>
-
-                            <dt class="col-6">Días de entrenamiento / prueba</dt>
-                            <dd class="col-6">
-                                {% if estado_modelo.modelo.dias_entrenamiento is not None %}
-                                    {{ estado_modelo.modelo.dias_entrenamiento }} / {{ estado_modelo.modelo.dias_prueba }} días
-                                {% else %}
-                                    <span class="text-muted">No registrado</span>
-                                {% endif %}
-                            </dd>
-                        {% endif %}
                     </dl>
-                    {% if estado_modelo.fuente_metricas %}
-                        <div class="alert {% if estado_modelo.modelo.fase == 'base' %}alert-warning{% else %}alert-info{% endif %} small mt-3 mb-0 py-2">
-                            {{ estado_modelo.fuente_metricas }}
-                        </div>
-                    {% endif %}
                 {% else %}
-                    <p class="text-muted mb-0">
-                        Todavía no hay un modelo entrenado. Corre <code>entrenar_base</code>.
-                    </p>
+                    <p class="text-muted mb-0">Todavía no hay un modelo ajustado en producción. Corre <code>entrenar_ajustado</code>.</p>
                 {% endif %}
             </div>
         </div>
@@ -81,63 +274,272 @@
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-body">
-                <h6 class="card-title"><i class="bi bi-bar-chart-steps me-1"></i> Comparación de los tres modelos</h6>
-                {% if comparacion %}
-                    <p class="text-muted small mb-3">
-                        Las cuatro métricas sobre el mismo test interno. En MAE, RMSE y SMAPE gana el valor
-                        más bajo; en R², el más alto. <i class="bi bi-trophy-fill text-success"></i> marca al
-                        ganador de cada métrica. Demuestra si la transferencia de aprendizaje aporta valor
-                        frente a no usarla.
+                <h6 class="card-title">
+                    <i class="bi bi-database me-1"></i> Modelo base
+                    <span class="badge-suave badge-suave-info ms-1"><i class="bi bi-layers-fill"></i> Base vigente</span>
+                </h6>
+                {% if base %}
+                    <p class="text-muted small mb-2">
+                        Preentrenado con el dataset externo; no pronostica por sí solo: es el punto de partida del
+                        ajuste fino del modelo en producción.
                     </p>
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle mb-0 tabla-compacta">
-                            <thead>
-                                <tr>
-                                    <th>Modelo</th>
-                                    {% for metrica in comparacion.metricas %}
-                                        <th class="text-end">{{ metrica }}</th>
-                                    {% endfor %}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for fila in comparacion.filas %}
-                                    <tr>
-                                        <td>
-                                            {{ fila.nombre }}
-                                            {% if fila.es_activo %}
-                                                <span class="badge-suave badge-suave-success ms-1">
-                                                    <i class="bi bi-check-circle-fill"></i> Activo
-                                                </span>
-                                            {% endif %}
-                                        </td>
-                                        {% for celda in fila.celdas %}
-                                            <td class="text-end{% if celda.gana %} fw-semibold text-success{% endif %}">
-                                                {% if celda.valor is None %}
-                                                    <span class="text-muted">—</span>
-                                                {% else %}
-                                                    {% if celda.gana %}<i class="bi bi-trophy-fill me-1" title="Gana en esta métrica"></i>{% endif %}{{ celda.valor|floatformat:celda.decimales }}
-                                                {% endif %}
-                                            </td>
-                                        {% endfor %}
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <dl class="row mb-0 small">
+                        <dt class="col-6">Modelo</dt>
+                        <dd class="col-6">#{{ base.pk }} — {{ base.algoritmo }}</dd>
+
+                        <dt class="col-6">Entrenado el</dt>
+                        <dd class="col-6">{{ base.fecha_entrenamiento|date:'d/m/Y H:i' }}</dd>
+
+                        <dt class="col-6">Registros externos</dt>
+                        <dd class="col-6">{{ base.n_registros_externos|floatformat:"0g" }}</dd>
+
+                        <dt class="col-6">MAE / R² (test externo)</dt>
+                        <dd class="col-6">{{ base.mae|floatformat:2 }} / {{ base.r2|floatformat:4 }}</dd>
+                    </dl>
+                    <div class="alert alert-warning small mt-3 mb-0 py-2">
+                        Estas métricas se midieron sobre el test del dataset externo (Kaggle), no sobre datos de la
+                        microempresa: no son comparables con las del modelo en producción.
                     </div>
                 {% else %}
-                    <p class="estado-vacio-discreto mb-0">
-                        El modelo activo todavía no tiene la comparación de los tres modelos guardada.
-                        Corre <code>entrenar_ajustado</code>.
-                    </p>
+                    <p class="text-muted mb-0">Todavía no hay un modelo base. Corre <code>entrenar_base</code>.</p>
                 {% endif %}
             </div>
         </div>
     </div>
 </div>
 
+{# --- Evaluación vigente del pronóstico --------------------------------- #}
+<h2 class="h5 mb-2"><i class="bi bi-bullseye me-1"></i> Exactitud del pronóstico del modelo en producción</h2>
+{% if evaluacion %}
+    <p class="text-muted small mb-2">
+        Validación de origen móvil: en cada origen el ajuste se rehace solo con los días anteriores y se pronostica
+        encadenando. Reporte <code>{{ evaluacion.archivo }}</code> ({{ evaluacion.fecha|date:'d/m/Y H:i' }}),
+        modelo #{{ evaluacion.modelo }}, origen {{ evaluacion.origen }}.
+        {% if evaluacion.categorias_sin_pronostico %}
+            Sin pronóstico del modelo (solo punto de reorden):
+            {% for categoria, dias in evaluacion.categorias_sin_pronostico.items %}{{ categoria }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+        {% endif %}
+    </p>
+    {% if not evaluacion.coincide %}
+        <div class="alert alert-warning small py-2">
+            El reporte más reciente corresponde al modelo #{{ evaluacion.modelo }}, no al que está en producción
+            (#{{ produccion.pk }}). Corre <code>evaluar_predicciones</code> para evaluar el vigente.
+        </div>
+    {% endif %}
+
+    {% for h in evaluacion.horizontes %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="card-title">
+                    {{ h.titulo }}
+                    {% if h.horizonte_dias > 1 %}(H = {{ h.horizonte_dias }} días, suma de la ventana){% else %}(H = 1){% endif %}
+                    {% if h.principal %}
+                        <span class="badge-suave badge-suave-info ms-1">Principal: el que usa la decisión de compra</span>
+                    {% else %}
+                        <span class="badge-suave badge-suave-secondary ms-1">Secundario</span>
+                    {% endif %}
+                </h6>
+                <p class="text-muted small mb-2">
+                    {{ h.n_origenes }} orígenes ({{ h.origen_inicio|date:'d/m' }} a {{ h.origen_fin|date:'d/m' }}).
+                    MAE y RMSE en unidades {% if h.horizonte_dias > 1 %}por ventana{% else %}por día{% endif %}.
+                </p>
+
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2 tabla-compacta tabla-metricas">
+                        <thead>
+                            <tr>
+                                <th>Categoría</th>
+                                <th class="text-end">Exactitud</th>
+                                <th class="text-end">WAPE</th>
+                                <th class="text-end">MAE</th>
+                                <th class="text-end">RMSE</th>
+                                <th class="text-end">Acierto ±{{ h.tolerancia|porcentaje:0 }}</th>
+                                <th class="text-end">R² intra-categoría</th>
+                                <th class="text-end">Desv. WAPE entre orígenes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for f in h.filas %}
+                                <tr{% if f.es_total %} class="fw-semibold"{% endif %}>
+                                    <td>{{ f.categoria }}</td>
+                                    <td class="text-end">{{ f.exactitud|porcentaje }}</td>
+                                    <td class="text-end">{{ f.wape|porcentaje }}</td>
+                                    <td class="text-end">{{ f.mae|floatformat:2 }}</td>
+                                    <td class="text-end">{{ f.rmse|floatformat:2 }}</td>
+                                    <td class="text-end">{{ f.acierto|porcentaje }}</td>
+                                    <td class="text-end">
+                                        {% if f.es_total %}
+                                            <span class="text-muted fw-normal" title="R² global: no interpretable por sí solo">{{ f.r2|floatformat:3 }} (global)</span>
+                                            <div><span class="badge-suave badge-suave-warning mt-1">no interpretable solo</span></div>
+                                        {% else %}
+                                            {{ f.r2|floatformat:3|default:"—" }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">{% if f.desviacion is not None %}±{{ f.desviacion|porcentaje }}{% else %}—{% endif %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="alert alert-warning small py-2 mb-3 aviso-r2-global">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    El R² global mezcla categorías de volúmenes muy distintos: buena parte de lo que "explica" es la
+                    diferencia de nivel entre categorías, así que por sí solo sobreestima el desempeño. La lectura
+                    correcta es el R² dentro de cada categoría.
+                </div>
+
+                <h6 class="small fw-semibold mb-1">Contra las tres líneas base (mismos orígenes)</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2 tabla-compacta tabla-metricas">
+                        <thead>
+                            <tr>
+                                <th>Método</th>
+                                <th class="text-end">Exactitud</th>
+                                <th class="text-end">WAPE</th>
+                                <th class="text-end">Desv. WAPE entre orígenes</th>
+                                <th class="text-end">El modelo la supera en</th>
+                                <th class="text-end">p bilateral (prueba de signos)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in h.comparacion %}
+                                <tr{% if c.es_modelo %} class="fw-semibold"{% endif %}>
+                                    <td>{{ c.nombre }}</td>
+                                    <td class="text-end">{{ c.exactitud|porcentaje }}</td>
+                                    <td class="text-end">{{ c.wape|porcentaje }}</td>
+                                    <td class="text-end">{% if c.desviacion is not None %}±{{ c.desviacion|porcentaje }}{% else %}—{% endif %}</td>
+                                    <td class="text-end">
+                                        {% if c.por_origen %}{{ c.por_origen.gana }} de {{ c.por_origen.origenes }} orígenes{% else %}—{% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if c.por_origen %}{{ c.por_origen.p_bilateral|floatformat:3 }}{% else %}—{% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="small mb-2">
+                    {% if h.supera_todas %}
+                        <i class="bi bi-check-circle-fill text-success me-1"></i>El modelo supera en WAPE total a las tres líneas base.
+                    {% else %}
+                        <i class="bi bi-x-circle-fill text-danger me-1"></i>El modelo no supera en WAPE total a las tres líneas base
+                        (mejor línea base: {{ h.mejor_linea_base }}).
+                    {% endif %}
+                </p>
+                <div class="alert alert-secondary small py-2 mb-0 aviso-prueba-signos">
+                    <i class="bi bi-info-circle-fill me-1"></i>
+                    Los orígenes consecutivos se solapan:
+                    {% if h.horizonte_dias > 1 %}comparten {{ h.horizonte_dias|add:"-1" }} de sus {{ h.horizonte_dias }} días pronosticados y casi todo el histórico de ajuste{% else %}comparten casi todo el histórico de ajuste{% endif %}.
+                    Por eso los valores p indican consistencia, no significancia estadística.
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <p class="estado-vacio-discreto mb-0">
+                No hay un reporte de evaluación con validación de origen móvil. Corre <code>evaluar_predicciones</code>.
+            </p>
+        </div>
+    </div>
+{% endif %}
+
+{# --- Estudio de ablación ------------------------------------------------ #}
+<div class="card mb-4">
+    <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-diagram-3 me-1"></i> Estudio de ablación: cuánto aporta cada fuente de datos</h6>
+        {% if ablacion %}
+            <p class="text-muted small mb-2">
+                Mismos orígenes y filas que la evaluación. Reporte <code>{{ ablacion.archivo }}</code>
+                ({{ ablacion.fecha|date:'d/m/Y H:i' }}).
+            </p>
+            {% if ablacion.precision %}
+                <div class="alert alert-info small py-2">{{ ablacion.precision }}</div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-2 tabla-compacta tabla-metricas">
+                    <thead>
+                        <tr>
+                            <th>Configuración</th>
+                            <th class="text-end">Exactitud ventana</th>
+                            <th class="text-end">Sesgo {{ ablacion.categoria_sesgo }} (ventana)</th>
+                            <th class="text-end">Exactitud diario</th>
+                            <th class="text-end">Sesgo {{ ablacion.categoria_sesgo }} (diario)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for f in ablacion.filas %}
+                            <tr{% if f.es_linea_base %} class="text-muted"{% elif f.clave == 'C' %} class="fw-semibold"{% endif %}>
+                                <td>
+                                    {{ f.nombre }}
+                                    {% if f.es_linea_base %}<span class="badge-suave badge-suave-secondary ms-1">Línea base</span>{% endif %}
+                                </td>
+                                <td class="text-end">{{ f.horizontes.ventana.exactitud|porcentaje }}</td>
+                                <td class="text-end">{{ f.horizontes.ventana.sesgo_categoria|porcentaje_signo }}</td>
+                                <td class="text-end">{{ f.horizontes.diario.exactitud|porcentaje }}</td>
+                                <td class="text-end">{{ f.horizontes.diario.sesgo_categoria|porcentaje_signo }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted small mb-3">
+                Sesgo = Σ(pronóstico − real) / Σ real: positivo es sobreestimación, negativo subestimación.
+            </p>
+
+            {% if ablacion.comparaciones %}
+                <h6 class="small fw-semibold mb-1">Origen por origen, en la ventana de lead time</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-2 tabla-compacta tabla-metricas">
+                        <thead>
+                            <tr>
+                                <th>Comparación</th>
+                                <th>Qué mide</th>
+                                <th class="text-end">Gana en</th>
+                                <th class="text-end">p bilateral</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in ablacion.comparaciones %}
+                                <tr>
+                                    <td>{{ c.nombre }}</td>
+                                    <td>{{ c.mide }}</td>
+                                    <td class="text-end">{{ c.gana }} de {{ c.origenes }}</td>
+                                    <td class="text-end">{{ c.p_bilateral|floatformat:3 }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="alert alert-secondary small py-2 mb-3 aviso-prueba-signos">
+                    <i class="bi bi-info-circle-fill me-1"></i>
+                    Los orígenes se solapan (comparten 6 de sus 7 días pronosticados): los valores p indican
+                    consistencia, no significancia estadística.
+                </div>
+            {% endif %}
+
+            {% if ablacion.lectura %}
+                <h6 class="small fw-semibold mb-1">Lectura</h6>
+                <ol class="small mb-0 ps-3">
+                    {% for linea in ablacion.lectura %}<li>{{ linea }}</li>{% endfor %}
+                </ol>
+            {% endif %}
+        {% else %}
+            <p class="estado-vacio-discreto mb-0">No hay un reporte del estudio de ablación. Corre <code>evaluar_ablacion</code>.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# --- Historial ------------------------------------------------------------ #}
 <div class="card">
     <div class="card-body">
         <h6 class="card-title"><i class="bi bi-clock-history me-1"></i> Historial de modelos entrenados</h6>
+        <p class="text-muted small mb-2">
+            Métricas de la división única de cada entrenamiento (las del base, sobre el test del dataset externo).
+            La columna "Medido sobre" indica qué filas se pueden comparar entre sí.
+        </p>
         {% if pagina.object_list %}
             <div class="table-responsive">
                 <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
@@ -146,7 +548,7 @@
                             <th>Entrenado el</th>
                             <th>Fase</th>
                             <th>Nivel</th>
-                            <th>Algoritmo</th>
+                            <th>Medido sobre</th>
                             <th class="text-end">MAE</th>
                             <th class="text-end">RMSE</th>
                             <th class="text-end">SMAPE</th>
@@ -157,21 +559,46 @@
                     <tbody>
                         {% for m in pagina %}
                             <tr{% if m.descartado %} class="text-muted"{% endif %}>
-                                <td>{{ m.fecha_entrenamiento|date:'d/m/Y H:i' }}</td>
+                                <td>{{ m.fecha_entrenamiento|date:'d/m/Y H:i' }}<div class="text-muted small">#{{ m.pk }}</div></td>
                                 <td>{{ m.get_fase_display }}</td>
-                                <td>{{ m.get_nivel_display }}</td>
-                                <td>{{ m.algoritmo }}</td>
+                                <td class="celda-nivel">
+                                    {% if m.fase == 'base' %}
+                                        No aplica
+                                        <div class="text-muted small">Series tienda-ítem de Kaggle</div>
+                                    {% elif m.nivel == 'producto' %}
+                                        {{ m.get_nivel_display }}
+                                        <span class="badge-suave badge-suave-secondary enfoque-descartado">Enfoque descartado</span>
+                                        <div class="small text-muted">
+                                            Enfoque por producto, descartado por densidad insuficiente de demanda: no es
+                                            comparable con el enfoque por categoría vigente.
+                                        </div>
+                                    {% else %}
+                                        {{ m.get_nivel_display }}
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if m.conjunto_medicion == 'externo' %}
+                                        <span class="badge-suave badge-suave-warning">{{ m.get_conjunto_medicion_display }}</span>
+                                        <div class="small text-muted">No comparable con las filas de la microempresa</div>
+                                    {% else %}
+                                        {{ m.get_conjunto_medicion_display|default:"—" }}
+                                    {% endif %}
+                                </td>
                                 <td class="text-end">{{ m.mae|floatformat:2 }}</td>
                                 <td class="text-end">{{ m.rmse|floatformat:2 }}</td>
                                 <td class="text-end">
                                     {% if m.descartado %}<span title="SMAPE no válido: modelo descartado">—</span>{% else %}{{ m.smape|floatformat:4 }}{% endif %}
                                 </td>
                                 <td class="text-end">{{ m.r2|floatformat:4 }}</td>
-                                <td>
+                                <td class="celda-estado">
                                     {% if m.descartado %}
                                         <span class="badge-suave badge-suave-danger" title="{{ m.motivo_descarte }}"><i class="bi bi-x-circle-fill"></i> Descartado</span>
+                                    {% elif m.activo and m.fase == 'base' %}
+                                        <span class="badge-suave badge-suave-info"><i class="bi bi-layers-fill"></i> Base vigente</span>
+                                    {% elif m.activo and produccion and m.pk == produccion.pk %}
+                                        <span class="badge-suave badge-suave-success"><i class="bi bi-broadcast"></i> En producción</span>
                                     {% elif m.activo %}
-                                        <span class="badge-suave badge-suave-success"><i class="bi bi-check-circle-fill"></i> Activo</span>
+                                        <span class="badge-suave badge-suave-secondary" title="Activo, pero predecir_demanda usa otro ajustado"><i class="bi bi-dash-circle-fill"></i> Activo sin uso</span>
                                     {% else %}
                                         <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Reemplazado</span>
                                     {% endif %}
@@ -191,4 +618,7 @@
         {% endif %}
     </div>
 </div>
+
+</div>
+</details>
 {% endblock %}

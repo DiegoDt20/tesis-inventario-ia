@@ -73,6 +73,34 @@ indicadores.
   submódulo directamente (`from .views import dashboard, pedidos, ...`).
 - `inventario/servicios/indicadores.py` — cálculo de EI/NS/COI (antes
   `inventario/indicadores.py`).
+- `inventario/servicios/reportes_modelo.py` — lee el reporte más reciente
+  de `artefactos/evaluacion/` (`evaluacion_walkforward_*.json`) y de
+  `artefactos/ablacion/` para la pantalla `/modelo/` (`views/modelo.py`).
+  La pantalla NO recalcula métricas al cargar; si falta un reporte,
+  degrada mostrando lo que existe. Muestra "En producción" (ajustado
+  activo) y "Base vigente" (base activo), las tres advertencias (R²
+  global, solapamiento de orígenes en la prueba de signos, enfoque por
+  producto descartado) y la columna "Medido sobre"
+  (`ModeloEntrenado.conjunto_medicion`, externo/interno; migración 0029
+  lo rellenó según la fase; `save()` lo deduce si no se indica). Filtros
+  `porcentaje`/`porcentaje_signo` en `inventario_extras` (redondean:
+  `number_format` trunca).
+  Arriba de todo, un resumen sin jerga para el dueño (`resumen_pronostico`):
+  la exactitud total de la VENTANA del mismo reporte (nunca la diaria), una
+  frase en castellano llano, el semáforo por categoría con umbrales fijos
+  (`SEMAFORO_VERDE_DESDE` 0.80 y `SEMAFORO_AMBAR_DESDE` 0.60, fijados el
+  04/10/2026, no ajustarlos por resultado) y la advertencia para cada
+  categoría en ámbar o rojo (hoy accesorio). Sin reporte vigente, el
+  resumen nombra `evaluar_predicciones` en vez de un número. Todo el
+  detalle técnico está en un `<details>` cerrado en cada visita (abierto
+  solo con `?page=` del historial).
+  En el resumen también van las barras por categoría con el color del
+  semáforo y el gráfico "¿El pronóstico sigue a la venta real?": uno por
+  categoría, cada uno con su eje desde cero, con real (línea continua) y
+  pronóstico (punteada) por ventana. Los datos salen de
+  `series_por_categoria`, que copia las `ventanas` del reporte walk-forward
+  (sin recalcular ni inventar ventanas). Chart.js, registrado en
+  `window.__graficosDibujar` para redibujar al cambiar de tema.
 - `inventario/tests/` — paquete de tests, un archivo `test_*.py` por área
   (p. ej. `test_carga_datos.py`, `test_ml.py`, `test_vistas.py`).
 - `artefactos/modelos_ml/` — modelos de XGBoost entrenados (`.json`), no se

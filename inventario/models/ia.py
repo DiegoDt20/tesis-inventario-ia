@@ -24,6 +24,10 @@ class ModeloEntrenado(models.Model):
         BASE = 'base', 'Base (preentrenado)'
         AJUSTADO = 'ajustado', 'Ajustado (transferencia)'
 
+    class ConjuntoMedicion(models.TextChoices):
+        EXTERNO = 'externo', 'Dataset externo (Kaggle)'
+        INTERNO = 'interno', 'Datos de la microempresa'
+
     fecha_entrenamiento = models.DateTimeField(auto_now_add=True, db_index=True)
     fase = models.CharField(max_length=10, choices=Fase.choices, db_index=True)
     nivel = models.CharField(
@@ -92,6 +96,11 @@ class ModeloEntrenado(models.Model):
     # modelo se ajustó sobre la demanda sin escalar (los anteriores al
     # 03/10/2026). predecir_demanda y evaluar_predicciones lo leen de aquí.
     escalado = models.JSONField(null=True, blank=True)
+    # Sobre qué conjunto se midieron mae/rmse/smape/r2: el test del dataset
+    # externo (fase "base", entrenar_base) o el de los datos de la
+    # microempresa (fase "ajustado"). Métricas de conjuntos distintos no son
+    # comparables entre sí. Si no se indica, save() lo deduce de la fase.
+    conjunto_medicion = models.CharField(max_length=10, choices=ConjuntoMedicion.choices, blank=True)
     ruta_archivo = models.CharField(max_length=500)
     activo = models.BooleanField(default=True)
 
@@ -102,6 +111,17 @@ class ModeloEntrenado(models.Model):
 
     def __str__(self):
         return f'{self.get_fase_display()} - {self.fecha_entrenamiento:%Y-%m-%d %H:%M}'
+
+    @classmethod
+    def conjunto_de_fase(cls, fase):
+        """Conjunto sobre el que mide sus métricas cada fase: el base, sobre
+        el test del dataset externo; el ajustado, sobre el de la empresa."""
+        return cls.ConjuntoMedicion.EXTERNO if fase == cls.Fase.BASE else cls.ConjuntoMedicion.INTERNO
+
+    def save(self, *args, **kwargs):
+        if not self.conjunto_medicion:
+            self.conjunto_medicion = self.conjunto_de_fase(self.fase)
+        super().save(*args, **kwargs)
 
 
 class Prediccion(models.Model):

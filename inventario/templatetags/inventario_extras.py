@@ -1,5 +1,6 @@
 """Filtros de plantilla compartidos por las pantallas de inventario."""
 from django import template
+from django.utils.formats import number_format
 
 register = template.Library()
 
@@ -67,3 +68,24 @@ def icono_estado(valor):
     el mismo valor de estado/severidad."""
     color = _MAPA_COLORES.get(_clave(valor), 'secondary')
     return _ICONOS_POR_COLOR[color]
+
+
+@register.filter
+def porcentaje(valor, decimales=1):
+    """Fracción como porcentaje con el formato local (0.164 → "16,4 %"), o
+    un guion si no está definida."""
+    if valor is None or valor == '':
+        return '—'
+    # number_format trunca los decimales sobrantes: se redondea antes. El
+    # espacio antes de % no se parte entre líneas.
+    return f'{number_format(round(float(valor) * 100, int(decimales)), int(decimales))}\u00a0%'
+
+
+@register.filter
+def porcentaje_signo(valor, decimales=1):
+    """Como porcentaje, con el signo explícito: para sesgos (+31,3 % es
+    sobreestimación, −3,8 % subestimación)."""
+    if valor is None or valor == '':
+        return '—'
+    signo = '+' if float(valor) > 0 else ('−' if float(valor) < 0 else '')
+    return f'{signo}{number_format(round(abs(float(valor)) * 100, int(decimales)), int(decimales))}\u00a0%'

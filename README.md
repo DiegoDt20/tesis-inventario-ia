@@ -227,7 +227,7 @@ negocio.
 | `ConteoDetalle`        | `conteo` (FK), `producto` (FK), `stock_sistema`, `stock_fisico`, `diferencia` (calculado)                                     |
 | `Merma`                | `producto` (FK), `cantidad`, `motivo`, `costo_unitario`, `fecha`, `origen`                                                    |
 | `CostoAlmacenamiento`  | `periodo_mes`, `concepto`, `monto`, `origen`                                                                                  |
-| `ModeloEntrenado`      | `fecha_entrenamiento`, `fase` (base/ajustado), `nivel` (producto/categoria), `algoritmo`, `hiperparametros`, `mae`, `rmse`, `smape`, `r2`, `mae_linea_base`, `mae_solo_interno`, `n_registros_externos`, `n_registros_internos`, `origen_datos_internos`, `dias_entrenamiento`, `dias_prueba`, `ruta_archivo`, `activo` |
+| `ModeloEntrenado`      | `fecha_entrenamiento`, `fase` (base/ajustado), `nivel` (producto/categoria), `algoritmo`, `hiperparametros`, `mae`, `rmse`, `smape`, `r2`, `mae_linea_base`, `mae_solo_interno`, `n_registros_externos`, `n_registros_internos`, `origen_datos_internos`, `dias_entrenamiento`, `dias_prueba`, `escalado`, `conjunto_medicion` (externo/interno: sobre qué conjunto se midieron mae/rmse/smape/r2), campos de la evaluación de exactitud, `ruta_archivo`, `activo` |
 | `Prediccion`           | `producto` (FK), `fecha_generacion`, `fecha_objetivo`, `demanda_predicha`, `demanda_real`, `modelo` (FK a `ModeloEntrenado`), `nivel_prediccion`, `participacion_usada` |
 | `Recomendacion`        | `producto` (FK), `fecha_generacion`, `estado` (crítico/reponer/normal/exceso), `stock_actual_snapshot`, `demanda_predicha_periodo`, `desviacion_demanda`, `lead_time_usado`, `stock_seguridad`, `punto_reorden`, `cantidad_sugerida`, `nivel_servicio_objetivo`, `explicacion`, `aceptada`, `fecha_decision` |
 | `Anomalia`             | `producto` (FK), `fecha_deteccion`, `tipo`, `severidad`, `score`, `valor_observado`, `valor_esperado`, `descripcion`, `revisada`, `fecha_revision` |
@@ -1051,6 +1051,110 @@ las tres líneas base.
   de lead time (16.4% vs. 18.5%), pero no de forma consistente entre
   orígenes."
 - El horizonte diario no distingue a ninguna configuración de las medias.
+
+## Pantalla del modelo (`/modelo/`)
+
+**Resumen para el dueño, arriba de todo.** Va sin jerga (ni WAPE, ni R²,
+ni valores p, ni orígenes) y cabe en una pantalla de portátil (probado a
+1280×720 y 1366×768) sin desplazarse:
+
+- la exactitud del pronóstico en la ventana de reposición en número grande
+  (83,6 %), con una frase que la explica ("De cada 100 unidades que se
+  venden en una semana, el pronóstico acierta casi 84; las otras 16 se le
+  escapan, de más o de menos") y para qué la usa el sistema (cuánto
+  reponer durante los 7 días que tarda en llegar un pedido);
+- un semáforo por categoría con **umbrales fijados el 04/10/2026 antes de
+  ver el resultado, que no se ajustan**: verde desde 80 %, ámbar entre 60 %
+  y 80 %, rojo por debajo de 60 % (se compara el valor del reporte, sin
+  redondear). Hoy: esmalte 86,8 % y látex 83,7 % en verde, accesorio
+  67,2 % en ámbar;
+- una advertencia para cada categoría en ámbar o rojo. Hoy: "En la
+  categoría accesorio el pronóstico es menos confiable. Conviene revisar
+  esa sugerencia antes de comprar."
+
+**Presentación** (04/10/2026). El número es el elemento dominante de la
+pantalla. Cada categoría tiene una barra horizontal del color del semáforo,
+con su porcentaje al final, así que se ve de un golpe que accesorio va por
+detrás. Debajo hay un gráfico **"¿El pronóstico sigue a la venta real?"**:
+uno por categoría, cada uno con su propio eje desde cero (sus volúmenes
+son muy distintos: esmalte ~270 u por ventana, accesorio ~54). Cada uno
+tiene una línea continua con círculos para la venta real y una punteada
+con triángulos para el pronóstico, y una leyenda que no depende solo del
+color. Hay un punto por cada una de las 11 ventanas de 7 días evaluadas,
+con su fecha de inicio. Los datos son las `ventanas` que ya guarda
+`evaluar_predicciones` en el reporte: no se recalculan, y una ventana que
+no está en el reporte no se dibuja. Se usa Chart.js, igual que el
+dashboard, y el gráfico se redibuja al cambiar entre tema claro y oscuro.
+Se verificaron los 33 puntos contra el reporte y contra los pedidos de la
+base. A mano: accesorio, del 15/08 al 21/08, real 10 + 18 + 18 = 46 u y
+pronóstico 71,2 u.
+
+La barra del detalle técnico es ahora una sección propia: ícono, título y
+descripción en dos renglones, y "Ver detalle" / "Ocultar detalle" con una
+flecha. Sigue cerrada por defecto.
+
+El número sale del mismo reporte y del mismo valor que la tabla de la
+ventana del detalle (`resumen_pronostico` en
+`servicios/reportes_modelo.py`). El horizonte diario (48,8 %) no aparece en
+el resumen: queda en el detalle como secundario, porque mostrarlo junto al
+83,6 % sin explicación haría pensar que el sistema falla la mitad de las
+veces. Si no hay reporte, o si el reporte es de otro modelo que el que está
+en uso, el resumen lo dice y nombra `python manage.py
+evaluar_predicciones`, en vez de mostrar un número vacío o viejo.
+
+**Detalle técnico plegado.** Todo lo que sigue (modelos vigentes,
+métricas por horizonte, líneas base, prueba de signos, ablación e
+historial) está dentro de "Detalle técnico de la investigación", un
+`<details>` cerrado en cada visita: se abre con un clic y no se recuerda el
+estado. Solo queda abierto al moverse por las páginas del historial, que
+está dentro. El contenido del detalle es el mismo que antes:
+
+Es la documentación técnica de la investigación en el sistema (la que se
+mostraría en una sustentación), separada del dashboard operativo. Desde el
+04/10/2026:
+
+- **Modelos vigentes con etiquetas por función.** "En producción" para el
+  ajustado que genera los pronósticos (#6) y "Base vigente" para el
+  preentrenado del que parte (#1). Los dos están activos, pero cumplen
+  funciones distintas y no compiten por el mismo puesto.
+- **Exactitud del pronóstico del modelo en producción**, leída del reporte
+  `evaluacion_walkforward_*.json` más reciente de `artefactos/evaluacion/`.
+  La pantalla no recalcula nada al cargar. Una tarjeta por horizonte:
+  ventana de lead time (principal) y diario (secundario). Cada una trae:
+  - exactitud, WAPE, MAE, RMSE, acierto ±20% y R² intra-categoría por
+    categoría y en total;
+  - el R² global marcado como "no interpretable solo";
+  - la desviación del WAPE entre orígenes;
+  - la comparación contra las tres líneas base, con el conteo por origen y
+    la prueba de signos.
+
+  Si el reporte es de otro modelo que el que está en producción, la
+  pantalla lo avisa.
+- **Estudio de ablación**, leído del `ablacion_*.json` más reciente de
+  `artefactos/ablacion/`: las cuatro configuraciones (y las líneas base)
+  con su exactitud y el sesgo de accesorio en ambos horizontes, las
+  comparaciones por origen y la lectura de las tres preguntas.
+- **Historial** con la columna "Medido sobre"
+  (`ModeloEntrenado.conjunto_medicion`). La fila del base #1 (R² 0.9034,
+  MAE 5.42) se midió sobre el test del dataset de Kaggle
+  (`entrenar_base`: últimos 30 días, 913,000 registros externos y 0
+  internos) y la propia fila dice que no es comparable con las de la
+  microempresa. Las filas de nivel producto de modelos ajustados (#2)
+  quedan marcadas como "Enfoque descartado". El base no se marca así: su
+  nivel no aplica (series tienda-ítem de Kaggle) y sigue vigente. No se
+  borró ni editó ningún registro; la migración 0029 solo etiqueta según la
+  fase.
+- **Tres advertencias en la propia pantalla.** Junto al R² global: mezcla
+  categorías de volúmenes muy distintos y sobreestima el desempeño. Junto a
+  la prueba de signos: los orígenes se solapan y los p indican
+  consistencia, no significancia. Junto a las filas de nivel producto: es
+  el enfoque descartado por densidad insuficiente de demanda.
+- Si falta un reporte (o no se puede leer), esa sección indica qué comando
+  correr y el resto de la pantalla se muestra igual.
+- Se verificó a mano que los 130 valores de las tablas de evaluación y
+  ablación coinciden con `evaluacion_walkforward_20261004_041640.json` y
+  `ablacion_20261004_051044.json`. Las tablas caben a 1280 y 1366 px de
+  ancho sin desbordar.
 
 ## Limitaciones
 
