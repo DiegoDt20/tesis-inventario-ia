@@ -1,88 +1,109 @@
-# Tarea 8: dar peso visual al resumen de /modelo/
+# Tarea 8 (revisada): resumen visual de /modelo/, con poco texto
 
 ## Problema
 
-El resumen quedó correcto en contenido pero pobre en presentación: párrafos pequeños en
-una tarjeta ancha, con mucho espacio sin usar. La página se ve vacía al abrirla.
+Dos cosas a la vez:
 
-La solución **no** es abrir el detalle técnico por defecto: eso devolvería el problema
-que la tarea 6 resolvió. La solución es que el resumen tenga el peso visual que le
-corresponde y que incluya una evidencia visual de la exactitud.
+1. Con el detalle plegado, la página queda medio vacía: el contenido termina a media
+   pantalla.
+2. El resumen es casi todo texto. Cuatro bloques de párrafos donde debería haber
+   indicadores visuales.
 
-## 1. El número principal
+La solución **no** es abrir el detalle por defecto. Es convertir el resumen en una
+pantalla de indicadores, con el mínimo de palabras, y agregar un gráfico que llene la
+parte baja con información útil.
 
-Hoy "83,6 %" se ve del mismo tamaño que el texto que lo rodea. Debe ser el elemento
-dominante de la pantalla: tipografía grande, el porcentaje como protagonista y la
-etiqueta "Exactitud del pronóstico" encima en tamaño pequeño.
+Los datos y los umbrales no cambian. Solo cambia cómo se presentan.
 
-La frase explicativa ("De cada 100 unidades…") queda debajo, en texto normal.
+## 1. Recortar el texto al mínimo
 
-## 2. Las categorías, como barras
+Lo que hay ahora y qué pasa con cada cosa:
 
-Reemplazar las tres líneas de texto por tres barras horizontales con su porcentaje al
-final y el color del semáforo ya definido (verde desde 80 %, ámbar 60–80 %, rojo
-debajo). Que se vea de un golpe que accesorio está por detrás de las otras dos.
+| Texto actual | Qué hacer |
+|---|---|
+| "Exactitud del pronóstico" | Se queda, como etiqueta pequeña sobre el número. |
+| "De cada 100 unidades que se venden en una semana, el pronóstico acierta casi 84; las otras 16 se le escapan, de más o de menos." | **Eliminar por completo.** El porcentaje se muestra solo, sin frase que lo explique. |
+| "El sistema usa este pronóstico para calcular cuánto reponer durante los 7 días que tarda en llegar un pedido al proveedor." | Sacarla del cuerpo. Va detrás de un icono de información (tooltip o ayuda emergente) junto al número. El dato es necesario para interpretar bien, pero no tiene que ocupar dos renglones. |
+| "Verde desde 80 %, ámbar entre 60 % y 80 %, rojo por debajo de 60 %." | Igual: detrás de un icono de información junto a las barras, no como texto suelto. |
+| La advertencia de accesorio | Se queda visible, pero más corta: "Accesorio: conviene revisar la sugerencia antes de comprar." Mantener el icono de alerta y el color ámbar. |
 
-Mantener los nombres y los valores actuales. No cambiar los umbrales.
+Nada más de texto en el resumen. Queda únicamente: la etiqueta "Exactitud del
+pronóstico", el porcentaje total, los tres porcentajes por categoría con sus barras, y
+la línea de advertencia de accesorio. Ninguna frase explicativa acompaña a los números.
 
-## 3. Gráfico de pronóstico contra venta real
+## 2. El número, como indicador
 
-Esto es lo que falta y lo que más vale para el dueño: ver que la línea del pronóstico
-sigue a la real.
+"83,6 %" debe ser el elemento dominante de la pantalla: tipografía grande, el porcentaje
+como protagonista, la etiqueta pequeña encima.
 
-Un gráfico por cada una de las once ventanas evaluadas, mostrando para cada ventana la
-demanda real y la pronosticada, sumadas por semana. Dos series: real y pronóstico.
+Acompañarlo con un indicador circular (anillo de progreso) que muestre el 83,6 % sobre
+100. Mismo lenguaje visual que los indicadores que ya usa el dashboard; no introducir un
+estilo nuevo.
 
-Requisitos:
+## 3. Las categorías, como barras
 
-- **Un gráfico por categoría**, o uno solo con selector de categoría. Lo que resulte más
-  simple de leer; no juntar las tres en el mismo eje, porque sus volúmenes son muy
-  distintos (esmalte ~270 por ventana, accesorio ~54) y la categoría chica quedaría
-  aplastada.
+Reemplazar las tres líneas de texto por tres barras horizontales:
+
+- Nombre de la categoría a la izquierda, barra al centro, porcentaje a la derecha.
+- Barra llena hasta su porcentaje sobre una pista del 100 %.
+- Color según el semáforo ya definido (verde desde 80 %, ámbar 60–80 %, rojo debajo).
+- Que se vea de un golpe que accesorio queda por detrás.
+
+Mismos nombres, mismos valores, mismos umbrales.
+
+## 4. Gráfico de pronóstico contra venta real
+
+Es lo que falta y lo que llena la parte baja con algo que sirve: ver que la línea del
+pronóstico sigue a la real a lo largo de las once ventanas evaluadas.
+
+- Dos series por categoría: demanda real y pronosticada, sumadas por ventana de 7 días.
+- **Un gráfico por categoría**, o uno con selector de categoría. No juntar las tres en el
+  mismo eje: esmalte mueve ~270 unidades por ventana y accesorio ~54, así que la chica
+  quedaría aplastada.
 - Datos leídos del reporte JSON de evaluación, no recalculados al cargar. Si el reporte
-  no trae el detalle por ventana, agregarlo al reporte en `evaluar_predicciones`.
-- Etiquetar las series directamente sobre el gráfico o con una leyenda clara; que no
-  dependa solo del color para distinguirlas.
-- Eje vertical en unidades, empezando en cero. Eje horizontal: la fecha de inicio de
-  cada ventana.
-- Sin efectos tridimensionales, sin degradados, sin adornos. Líneas o barras agrupadas.
-- Debe leerse igual en el tema claro y en el oscuro, que la página ya soporta.
-- Una leyenda de una línea debajo: qué se está viendo, en castellano llano.
+  no trae el detalle por ventana, agregarlo en `evaluar_predicciones`.
+- Eje vertical en unidades desde cero; eje horizontal, la fecha de inicio de cada ventana.
+- Series distinguibles sin depender solo del color (leyenda clara o etiqueta directa).
+- Sin efectos tridimensionales ni degradados. Líneas o barras agrupadas.
+- Legible en tema claro y oscuro.
+- Debajo, una línea corta diciendo qué se ve. Una línea, no un párrafo.
 
-Usar la misma librería de gráficos que ya emplea el dashboard, para no agregar
-dependencias.
+Usar la misma librería de gráficos que ya emplea el dashboard.
 
-## 4. La barra del detalle técnico
+## 5. La barra del detalle técnico
 
-Hoy es una línea delgada que parece un separador. Debe verse como una sección propia:
-más altura, un icono, el título y la descripción en dos renglones, y una indicación
-clara de que se despliega.
+Hoy parece un separador. Debe verse como una sección propia: más altura, icono, título y
+descripción en dos renglones, y una señal clara de que se despliega.
 
-Sigue **cerrada por defecto**. Eso no cambia.
+Sigue **cerrada por defecto**.
 
-## 5. Composición
+## 6. Composición
 
-Con el número grande, las barras y el gráfico, el resumen debe ocupar la pantalla de
-forma natural, sin huecos grandes ni elementos estirados para rellenar. Revisar a
-1366×768 y a ancho de portátil pequeño.
+Con el anillo, las barras y el gráfico, el resumen debe ocupar la pantalla de forma
+natural. Revisar a 1366×768 y a ancho de portátil pequeño.
 
-Si al final sobra espacio, dejarlo: el espacio en blanco ordenado se ve mejor que un
+Si al final sobra espacio, dejarlo. El espacio en blanco ordenado se ve mejor que un
 elemento agregado para rellenar.
 
 ## Lo que no hay que hacer
 
 - No abrir el detalle técnico por defecto.
-- No mover nada del detalle al resumen.
-- No cambiar números, umbrales ni textos ya aprobados.
+- No mover contenido del detalle al resumen.
+- No cambiar números, umbrales ni los nombres de las categorías.
+- No quitar la advertencia de accesorio: solo acortarla.
+- No esconder detrás de un icono algo que haga falta para no malinterpretar la cifra
+  principal; el contexto del lead time y los umbrales sí pueden ir ahí porque el número
+  se entiende sin ellos.
 - No agregar una librería de gráficos nueva.
-- No inventar datos para el gráfico: si una ventana no está en el reporte, no se dibuja.
+- No inventar datos: si una ventana no está en el reporte, no se dibuja.
 
 ## Tests
 
-- El gráfico se alimenta del reporte y no de cálculos en la vista.
+- El gráfico se alimenta del reporte, no de cálculos en la vista.
 - Sin reporte, el resumen muestra el aviso y no un gráfico vacío.
-- Los valores dibujados coinciden con los del reporte para al menos una ventana
-  verificada a mano.
+- Los valores dibujados coinciden con el reporte en al menos una ventana verificada a mano.
+- Las barras aplican el color correcto en los tres casos del semáforo.
+- La advertencia de accesorio sigue presente.
 - El detalle técnico sigue cerrado por defecto.
 
 ## Entregable

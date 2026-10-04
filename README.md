@@ -1054,40 +1054,51 @@ las tres líneas base.
 
 ## Pantalla del modelo (`/modelo/`)
 
-**Resumen para el dueño, arriba de todo.** Va sin jerga (ni WAPE, ni R²,
-ni valores p, ni orígenes) y cabe en una pantalla de portátil (probado a
-1280×720 y 1366×768) sin desplazarse:
+**Resumen para el dueño, arriba de todo: indicadores con el mínimo de
+palabras** (revisado el 04/10/2026, tarea 8). Va sin jerga (ni WAPE, ni R²,
+ni valores p, ni orígenes) y sin frases explicativas. Solo quedan:
 
-- la exactitud del pronóstico en la ventana de reposición en número grande
-  (83,6 %), con una frase que la explica ("De cada 100 unidades que se
-  venden en una semana, el pronóstico acierta casi 84; las otras 16 se le
-  escapan, de más o de menos") y para qué la usa el sistema (cuánto
-  reponer durante los 7 días que tarda en llegar un pedido);
-- un semáforo por categoría con **umbrales fijados el 04/10/2026 antes de
-  ver el resultado, que no se ajustan**: verde desde 80 %, ámbar entre 60 %
-  y 80 %, rojo por debajo de 60 % (se compara el valor del reporte, sin
-  redondear). Hoy: esmalte 86,8 % y látex 83,7 % en verde, accesorio
-  67,2 % en ámbar;
-- una advertencia para cada categoría en ámbar o rojo. Hoy: "En la
-  categoría accesorio el pronóstico es menos confiable. Conviene revisar
-  esa sugerencia antes de comprar."
+- la etiqueta "Exactitud del pronóstico" y el total de la ventana de
+  reposición (83,6 %) como elemento dominante, junto a un anillo de
+  progreso que muestra ese 83,6 % sobre 100. El dashboard no tiene anillos,
+  así que este usa el lenguaje de sus tarjetas KPI: pista teñida del
+  pigmento al 14 %, como `.kpi-icono`, trazo en el pigmento pleno y sin
+  degradados. Es un SVG, sin librería nueva;
+- una barra por categoría (nombre, barra sobre una pista del 100 % y
+  porcentaje) con el color del semáforo, cuyos **umbrales se fijaron el
+  04/10/2026 antes de ver el resultado y no se ajustan**: verde desde 80 %,
+  ámbar entre 60 % y 80 %, rojo por debajo de 60 % (se compara el valor del
+  reporte, sin redondear). Hoy: esmalte 86,8 % y látex 83,7 % en verde,
+  accesorio 67,2 % en ámbar;
+- la advertencia corta, con ícono de alerta en ámbar, para cada categoría
+  en ámbar o rojo. Hoy: "Accesorio: conviene revisar la sugerencia antes de
+  comprar."
 
-**Presentación** (04/10/2026). El número es el elemento dominante de la
-pantalla. Cada categoría tiene una barra horizontal del color del semáforo,
-con su porcentaje al final, así que se ve de un golpe que accesorio va por
-detrás. Debajo hay un gráfico **"¿El pronóstico sigue a la venta real?"**:
-uno por categoría, cada uno con su propio eje desde cero (sus volúmenes
-son muy distintos: esmalte ~270 u por ventana, accesorio ~54). Cada uno
-tiene una línea continua con círculos para la venta real y una punteada
-con triángulos para el pronóstico, y una leyenda que no depende solo del
-color. Hay un punto por cada una de las 11 ventanas de 7 días evaluadas,
-con su fecha de inicio. Los datos son las `ventanas` que ya guarda
-`evaluar_predicciones` en el reporte: no se recalculan, y una ventana que
-no está en el reporte no se dibuja. Se usa Chart.js, igual que el
-dashboard, y el gráfico se redibuja al cambiar entre tema claro y oscuro.
+El contexto del lead time ("El sistema usa este pronóstico para calcular
+cuánto reponer durante los 7 días…") y los umbrales del semáforo van en
+ayudas emergentes (ícono ⓘ, tooltip de Bootstrap, accesible con teclado y
+lector de pantalla), no como texto suelto. La frase "De cada 100 unidades…"
+se eliminó.
+
+Debajo hay un gráfico **"Pronóstico contra venta real"**, uno por
+categoría, cada uno con su propio eje desde cero (sus volúmenes son muy
+distintos: esmalte ~270 u por ventana, accesorio ~54):
+
+- la venta real va en línea continua con círculos y el pronóstico en
+  punteada con triángulos, con una leyenda que no depende solo del color;
+- hay un punto por cada una de las 11 ventanas de 7 días evaluadas, con su
+  fecha de inicio, y una sola línea debajo dice qué se ve;
+- los datos son las `ventanas` que ya guarda `evaluar_predicciones` en el
+  reporte: no se recalculan, y una ventana que no está en el reporte no se
+  dibuja;
+- se usa Chart.js, igual que el dashboard, y el gráfico se redibuja al
+  cambiar entre tema claro y oscuro.
+
 Se verificaron los 33 puntos contra el reporte y contra los pedidos de la
 base. A mano: accesorio, del 15/08 al 21/08, real 10 + 18 + 18 = 46 u y
-pronóstico 71,2 u.
+pronóstico 71,2 u. Revisado a 1366×768, 1280×720 y 1100 px de ancho.
+Capturas en `docs/capturas/modelo_resumen_claro.png` y
+`modelo_resumen_oscuro.png`.
 
 La barra del detalle técnico es ahora una sección propia: ícono, título y
 descripción en dos renglones, y "Ver detalle" / "Ocultar detalle" con una

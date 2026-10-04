@@ -4,6 +4,7 @@ modelos vigentes, lectura de los reportes guardados de evaluación y de
 ablación (el más reciente, degradando si falta alguno), advertencias y
 marca del enfoque por producto descartado."""
 import json
+import re
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -296,8 +297,9 @@ class ResumenPantallaTests(_PantallaBase):
         self.assertIn('<div class="resumen-numero">83,6\xa0%</div>', html)
         # El mismo texto aparece en la tabla de la ventana, dentro del detalle.
         self.assertIn('83,6\xa0%', html[html.index('<details'):])
-        self.assertIn('acierta casi 84; las otras 16', html)
-        self.assertIn('durante los 7 días que tarda en llegar un pedido', ' '.join(html.split()))
+        # El contexto del lead time va en la ayuda emergente, no como frase.
+        self.assertIn('data-bs-title="El sistema usa este pronóstico para calcular cuánto reponer durante los 7 '
+                      'días que tarda en llegar un pedido al proveedor."', html)
 
     def test_colores_por_categoria_y_advertencia(self):
         self._con_reporte()
@@ -307,16 +309,15 @@ class ResumenPantallaTests(_PantallaBase):
         self.assertIn('semaforo-rojo', resumen)   # látex de prueba, 50 %
         self.assertIn('Accesorio', resumen)
         self.assertIn('Látex', resumen)
-        self.assertIn('En las categorías accesorio y látex el pronóstico es menos confiable', resumen)
+        self.assertIn('Accesorio y Látex: conviene revisar las sugerencias antes de comprar.', resumen)
 
     def test_advertencia_de_accesorios_con_los_valores_reales(self):
         self.CATEGORIAS = {'accesorio': 0.6724391260483478, 'esmalte': 0.8680076625133349, 'latex': 0.8367900583794133}
         self._con_reporte()
         resumen = self._resumen(self._html())
-        self.assertIn(
-            'En la categoría accesorio el pronóstico es menos confiable. Conviene revisar esa sugerencia antes de '
-            'comprar.', resumen,
-        )
+        self.assertIn('Accesorio: conviene revisar la sugerencia antes de comprar.', resumen)
+        self.assertIn('bi-exclamation-triangle-fill', resumen)
+        self.assertIn('alert-warning', resumen)
 
     def test_sin_jerga_ni_horizonte_diario_en_el_resumen(self):
         self._con_reporte()
@@ -399,8 +400,8 @@ class GraficoResumenTests(_PantallaBase):
         # Lo dibujado es exactamente lo del contexto, que sale del reporte.
         self.assertEqual(self._datos_grafico(html), json.loads(json.dumps(respuesta.context['resumen']['grafico'])))
         self.assertIn('id="grafico-ventanas-accesorio"', html)
-        self.assertIn('¿El pronóstico sigue a la venta real?', html)
-        self.assertIn('la línea continua es lo que realmente se vendió', ' '.join(html.split()))
+        self.assertIn('Pronóstico contra venta real', html)
+        self.assertIn('Cada punto: lo vendido en los 7 días que empiezan en esa fecha, real y pronosticado.', html)
 
     def test_no_inventa_ventanas_que_no_estan_en_el_reporte(self):
         self._con_reporte()
@@ -441,4 +442,33 @@ class GraficoResumenTests(_PantallaBase):
         self.assertIn('Ver detalle', html)
         # El gráfico está en el resumen, antes del detalle, no adentro.
         self.assertLess(html.index('datos-grafico-ventanas'), html.index('<details'))
+
+    def test_indicadores_sin_frases_explicativas(self):
+        """Del resumen queda solo: la etiqueta, el total, las barras y la
+        advertencia. Lead time y umbrales van detrás de un ícono de ayuda."""
+        self._con_reporte()
+        html = self._html()
+        resumen = html[html.index('resumen-pronostico'):html.index('grafico-ventanas')]
+        sin_scripts = re.sub(r'<script.*?</script>', ' ', resumen, flags=re.S)
+        texto_visible = re.sub(r'<[^>]+>', ' ', sin_scripts)
+        self.assertNotIn('De cada 100 unidades', html)
+        self.assertNotIn('El sistema usa este pronóstico', texto_visible)
+        self.assertNotIn('Verde desde 80', texto_visible)
+        self.assertIn('data-bs-title="Verde desde 80 %, ámbar entre 60 % y 80 %, rojo por debajo de 60 %."', resumen)
+        self.assertEqual(sin_scripts.count('data-bs-toggle="tooltip"'), 2)
+        self.assertIn('Exactitud del pronóstico', texto_visible)
+
+    def test_anillo_de_progreso_con_el_total(self):
+        self._con_reporte()
+        html = self._html()
+        self.assertIn('class="anillo-progreso semaforo-verde"', html)
+        self.assertIn('stroke-dasharray="83.6 100"', html)
+        self.assertIn('aria-label="Exactitud del pronóstico: 83,6\xa0% de 100 %"', html)
+
+    def test_barras_con_el_color_del_semaforo_en_los_tres_casos(self):
+        self.CATEGORIAS = {'accesorio': 0.6724391260483478, 'esmalte': 0.8680076625133349, 'latex': 0.55}
+        self._con_reporte()
+        html = self._html()
+        barras = re.findall(r'class="barra-categoria semaforo-(\w+)">\s*<span class="barra-categoria-nombre">(\w+)', html)
+        self.assertEqual(barras, [('ambar', 'Accesorio'), ('verde', 'Esmalte'), ('rojo', 'Látex')])
 

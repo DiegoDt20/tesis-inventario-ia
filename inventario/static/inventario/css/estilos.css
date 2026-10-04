@@ -2220,6 +2220,7 @@ tr.htmx-swapping,
 /* ------------------------------------------------------------------ */
 
 .resumen-etiqueta {
+    white-space: nowrap;
     font-size: 0.78rem;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -2230,7 +2231,8 @@ tr.htmx-swapping,
 /* El número es el elemento dominante de la pantalla. */
 .resumen-numero {
     font-family: var(--fuente-display);
-    font-size: clamp(3.5rem, 7vw, 5.5rem);
+    font-size: clamp(3rem, 5.2vw, 4.6rem);
+    white-space: nowrap;
     font-weight: 800;
     line-height: 1;
     letter-spacing: -0.02em;
@@ -2239,13 +2241,55 @@ tr.htmx-swapping,
     margin: 0.35rem 0 0.75rem;
 }
 
-.resumen-frase {
-    font-size: 1.05rem;
+.semaforo-verde { --semaforo-color: var(--pigmento-verde); --semaforo-rgb: var(--pigmento-verde-rgb); }
+.semaforo-ambar { --semaforo-color: var(--pigmento-naranja); --semaforo-rgb: var(--pigmento-naranja-rgb); }
+.semaforo-rojo { --semaforo-color: var(--pigmento-rojo); --semaforo-rgb: var(--pigmento-rojo-rgb); }
+
+/* Indicador principal: anillo de progreso + número. Mismo lenguaje que las
+   tarjetas KPI del dashboard: pista teñida del pigmento al 14 % (como
+   .kpi-icono) y el trazo en el pigmento pleno, sin degradados. */
+.resumen-indicador {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
 }
 
-.semaforo-verde { --semaforo-color: var(--pigmento-verde); }
-.semaforo-ambar { --semaforo-color: var(--pigmento-naranja); }
-.semaforo-rojo { --semaforo-color: var(--pigmento-rojo); }
+.anillo-progreso {
+    width: 118px;
+    height: 118px;
+    flex-shrink: 0;
+    transform: rotate(-90deg);
+}
+
+.anillo-progreso circle {
+    fill: none;
+    stroke-width: 12;
+}
+
+.anillo-pista {
+    stroke: rgba(var(--semaforo-rgb), 0.14);
+}
+
+.anillo-valor {
+    stroke: var(--semaforo-color);
+    stroke-linecap: round;
+}
+
+.boton-ayuda {
+    border: 0;
+    background: none;
+    padding: 0 0.15rem;
+    color: var(--texto-tenue);
+    font-size: 0.95rem;
+    line-height: 1;
+    vertical-align: baseline;
+    cursor: help;
+}
+
+.boton-ayuda:hover,
+.boton-ayuda:focus-visible {
+    color: var(--acento);
+}
 
 .semaforo-punto {
     display: inline-block;
@@ -2257,21 +2301,20 @@ tr.htmx-swapping,
     flex-shrink: 0;
 }
 
-/* Barras de exactitud por categoría (sin degradados ni sombras). */
-.barra-categoria + .barra-categoria {
-    margin-top: 0.85rem;
+/* Barras de exactitud por categoría: nombre, barra y porcentaje en una
+   fila (sin degradados ni sombras). */
+.barra-categoria {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr 5rem;
+    align-items: center;
+    gap: 0.9rem;
 }
 
-.barra-categoria-cabecera {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.3rem;
+.barra-categoria + .barra-categoria {
+    margin-top: 0.9rem;
 }
 
 .barra-categoria-nombre {
-    display: inline-flex;
-    align-items: center;
     font-weight: 600;
 }
 
@@ -2280,13 +2323,13 @@ tr.htmx-swapping,
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     font-size: 1.15rem;
+    text-align: right;
 }
 
 .barra-categoria-pista {
-    height: 0.9rem;
+    height: 1rem;
     border-radius: 999px;
-    background-color: var(--superficie-hundida);
-    border: 1px solid var(--linea);
+    background-color: rgba(var(--semaforo-rgb), 0.14);
     overflow: hidden;
 }
 

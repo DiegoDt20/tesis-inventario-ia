@@ -217,32 +217,15 @@ def color_semaforo(exactitud):
     return 'rojo'
 
 
-def _frase_exactitud(exactitud, horizonte_dias):
-    """"De cada 100 unidades que se venden en una semana, el pronóstico
-    acierta casi 84; las otras 16 se le escapan, de más o de menos." El
-    "casi"/"algo más de" dice hacia dónde se redondeó."""
-    aciertos = round(exactitud * 100)
-    if exactitud * 100 < aciertos:
-        cuantas = f'casi {aciertos}'
-    elif exactitud * 100 > aciertos:
-        cuantas = f'algo más de {aciertos}'
-    else:
-        cuantas = str(aciertos)
-    periodo = 'una semana' if horizonte_dias == 7 else f'{horizonte_dias} días'
-    return (
-        f'De cada 100 unidades que se venden en {periodo}, el pronóstico acierta {cuantas}; '
-        f'las otras {100 - aciertos} se le escapan, de más o de menos.'
-    )
-
-
 def resumen_pronostico(evaluacion):
     """Resumen sin jerga para el dueño, a partir de la MISMA evaluación que
     la tabla de la ventana de lead time (el horizonte sobre el que se decide
     la compra; el diario no entra). None si no hay evaluación vigente.
 
-    Devuelve la exactitud total, la frase que la explica, el horizonte, una
-    fila por categoría con su color y las categorías en ámbar o rojo, para
-    la advertencia de dónde no confiar."""
+    Devuelve la exactitud total (y su color, para el anillo), el horizonte,
+    una fila por categoría con su color, la advertencia corta para las
+    categorías en ámbar o rojo (dónde no confiar) y las series del gráfico.
+    Sin frases explicativas: el resumen es de indicadores."""
     if not evaluacion or not evaluacion['coincide']:
         return None
     ventana = next((h for h in evaluacion['horizontes'] if h['clave'] == 'ventana'), None)
@@ -262,22 +245,19 @@ def resumen_pronostico(evaluacion):
         }
         for f in ventana['filas'] if not f['es_total']
     ]
-    menos_confiables = [c['nombre'].lower() for c in categorias if c['color'] in ('ambar', 'rojo')]
+    menos_confiables = [c['nombre'] for c in categorias if c['color'] in ('ambar', 'rojo')]
     advertencia = None
     if len(menos_confiables) == 1:
-        advertencia = (
-            f'En la categoría {menos_confiables[0]} el pronóstico es menos confiable. '
-            'Conviene revisar esa sugerencia antes de comprar.'
-        )
+        advertencia = f'{menos_confiables[0]}: conviene revisar la sugerencia antes de comprar.'
     elif menos_confiables:
-        advertencia = (
-            f'En las categorías {", ".join(menos_confiables[:-1])} y {menos_confiables[-1]} el pronóstico es '
-            'menos confiable. Conviene revisar esas sugerencias antes de comprar.'
-        )
+        nombres = f'{", ".join(menos_confiables[:-1])} y {menos_confiables[-1]}'
+        advertencia = f'{nombres}: conviene revisar las sugerencias antes de comprar.'
     return {
         'exactitud': total['exactitud'],
+        'color': color_semaforo(total['exactitud']),
+        # Porción del anillo (sobre 100), entre 0 y 100.
+        'anillo': f'{min(max(total["exactitud"], 0.0), 1.0) * 100:.1f}',
         'grafico': series_por_categoria(ventana['ventanas'], categorias),
-        'frase': _frase_exactitud(total['exactitud'], ventana['horizonte_dias']),
         'horizonte_dias': ventana['horizonte_dias'],
         'categorias': categorias,
         'advertencia': advertencia,

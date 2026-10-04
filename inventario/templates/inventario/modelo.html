@@ -6,39 +6,51 @@
 {% block contenido %}
 <h1 class="titulo-pantalla"><i class="bi bi-cpu me-2"></i>Modelo de predicción de demanda</h1>
 
-{# --- Resumen para el dueño: sin jerga, con peso visual ------------------- #}
+{# --- Resumen para el dueño: indicadores, el mínimo de palabras ------------ #}
 <div class="card mb-3 resumen-pronostico">
     <div class="card-body">
         {% if resumen %}
             <div class="row g-4 align-items-center">
-                <div class="col-lg-5">
-                    <div class="resumen-etiqueta">Exactitud del pronóstico</div>
-                    <div class="resumen-numero">{{ resumen.exactitud|porcentaje }}</div>
-                    <p class="resumen-frase mb-2">{{ resumen.frase }}</p>
-                    <p class="text-muted mb-0">
-                        El sistema usa este pronóstico para calcular cuánto reponer durante los
-                        {{ resumen.horizonte_dias }} días que tarda en llegar un pedido al proveedor.
-                    </p>
+                <div class="col-lg-6">
+                    <div class="resumen-indicador">
+                        <svg class="anillo-progreso semaforo-{{ resumen.color }}" viewBox="0 0 120 120" role="img"
+                             aria-label="Exactitud del pronóstico: {{ resumen.exactitud|porcentaje }} de 100 %">
+                            <circle class="anillo-pista" cx="60" cy="60" r="50" pathLength="100"></circle>
+                            <circle class="anillo-valor" cx="60" cy="60" r="50" pathLength="100"
+                                    stroke-dasharray="{{ resumen.anillo }} 100"></circle>
+                        </svg>
+                        <div>
+                            <div class="resumen-etiqueta">
+                                Exactitud del pronóstico
+                                <button type="button" class="boton-ayuda" data-bs-toggle="tooltip"
+                                        data-bs-title="El sistema usa este pronóstico para calcular cuánto reponer durante los {{ resumen.horizonte_dias }} días que tarda en llegar un pedido al proveedor."
+                                        aria-label="El sistema usa este pronóstico para calcular cuánto reponer durante los {{ resumen.horizonte_dias }} días que tarda en llegar un pedido al proveedor.">
+                                    <i class="bi bi-info-circle" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            <div class="resumen-numero">{{ resumen.exactitud|porcentaje }}</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="col-lg-7">
-                    <div class="resumen-etiqueta mb-2">Por categoría</div>
+                <div class="col-lg-6">
+                    <div class="resumen-etiqueta mb-2">
+                        Por categoría
+                        <button type="button" class="boton-ayuda" data-bs-toggle="tooltip"
+                                data-bs-title="Verde desde 80 %, ámbar entre 60 % y 80 %, rojo por debajo de 60 %."
+                                aria-label="Verde desde 80 %, ámbar entre 60 % y 80 %, rojo por debajo de 60 %.">
+                            <i class="bi bi-info-circle" aria-hidden="true"></i>
+                        </button>
+                    </div>
                     {% for c in resumen.categorias %}
                         <div class="barra-categoria semaforo-{{ c.color }}">
-                            <div class="barra-categoria-cabecera">
-                                <span class="barra-categoria-nombre">
-                                    <span class="semaforo-punto" aria-hidden="true"></span>{{ c.nombre }}
-                                </span>
-                                <span class="barra-categoria-valor">{{ c.exactitud|porcentaje }}</span>
-                            </div>
+                            <span class="barra-categoria-nombre">{{ c.nombre }}</span>
                             <div class="barra-categoria-pista" role="img"
                                  aria-label="{{ c.nombre }}: {{ c.exactitud|porcentaje }} ({% if c.color == 'verde' %}verde{% elif c.color == 'ambar' %}ámbar{% else %}rojo{% endif %})">
                                 <div class="barra-categoria-relleno" style="width: {{ c.ancho_barra }}%;"></div>
                             </div>
+                            <span class="barra-categoria-valor">{{ c.exactitud|porcentaje }}</span>
                         </div>
                     {% endfor %}
-                    <p class="text-muted small mt-2 mb-0">
-                        Verde desde 80&nbsp;%, ámbar entre 60&nbsp;% y 80&nbsp;%, rojo por debajo de 60&nbsp;%.
-                    </p>
                 </div>
             </div>
             {% if resumen.advertencia %}
@@ -46,6 +58,12 @@
                     <i class="bi bi-exclamation-triangle-fill me-1"></i>{{ resumen.advertencia }}
                 </div>
             {% endif %}
+            <script>
+                // Ayudas emergentes del resumen (Bootstrap ya está cargado en base.html).
+                document.querySelectorAll('.resumen-pronostico [data-bs-toggle="tooltip"]').forEach(function (el) {
+                    bootstrap.Tooltip.getOrCreateInstance(el);
+                });
+            </script>
         {% elif evaluacion and not evaluacion.coincide %}
             <div class="resumen-etiqueta">Exactitud del pronóstico</div>
             <p class="mb-0 aviso-sin-evaluacion">
@@ -67,7 +85,7 @@
     <div class="card mb-3 grafico-ventanas">
         <div class="card-body">
             <div class="grafico-ventanas-cabecera">
-                <h6 class="card-title mb-0">¿El pronóstico sigue a la venta real?</h6>
+                <h6 class="card-title mb-0">Pronóstico contra venta real</h6>
                 <div class="grafico-leyenda-corte mt-0">
                     <span class="grafico-leyenda-item"><span class="leyenda-real"></span> Venta real</span>
                     <span class="grafico-leyenda-item"><span class="leyenda-pronostico"></span> Pronóstico</span>
@@ -86,11 +104,7 @@
                     </div>
                 {% endfor %}
             </div>
-            <p class="text-muted small mt-2 mb-0">
-                Cada punto suma la venta de {{ resumen.horizonte_dias }} días a partir de la fecha indicada: la línea
-                continua es lo que realmente se vendió y la punteada lo que el sistema había pronosticado antes de que
-                empezaran esos días. Las ventanas se solapan (cada una empieza un día después que la anterior).
-            </p>
+            <p class="text-muted small mt-2 mb-0">Cada punto: lo vendido en los {{ resumen.horizonte_dias }} días que empiezan en esa fecha, real y pronosticado.</p>
             {{ resumen.grafico|json_script:"datos-grafico-ventanas" }}
             <script>
                 (function () {
@@ -174,7 +188,7 @@
                                         },
                                     },
                                     scales: {
-                                        x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 6, maxRotation: 0}},
+                                        x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 4, maxRotation: 0, autoSkipPadding: 12}},
                                         y: {
                                             beginAtZero: true,
                                             border: {display: false},
