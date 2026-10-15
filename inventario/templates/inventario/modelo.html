@@ -220,8 +220,12 @@
     <span class="detalle-tecnico-textos">
         <span class="detalle-tecnico-titulo">Detalle técnico de la investigación</span>
         <span class="detalle-tecnico-subtitulo">
-            Evaluación completa, comparación con métodos simples y estudio de ablación. Pensado para la
-            documentación de la tesis.
+            {% if mostrar_evaluacion %}
+                Evaluación completa, comparación con métodos simples y estudio de ablación. Pensado para la
+                documentación de la tesis.
+            {% else %}
+                Modelos vigentes e historial de entrenamientos. Pensado para la documentación de la tesis.
+            {% endif %}
         </span>
     </span>
     <span class="detalle-tecnico-accion">
@@ -322,6 +326,8 @@
     </div>
 </div>
 
+{# --- Evaluación y ablación: solo con MODELO_MOSTRAR_EVALUACION ---------- #}
+{% if mostrar_evaluacion %}
 {# --- Evaluación vigente del pronóstico --------------------------------- #}
 <h2 class="h5 mb-2"><i class="bi bi-bullseye me-1"></i> Exactitud del pronóstico del modelo en producción</h2>
 {% if evaluacion %}
@@ -546,6 +552,8 @@
     </div>
 </div>
 
+{% endif %}
+
 {# --- Historial ------------------------------------------------------------ #}
 <div class="card">
     <div class="card-body">
@@ -593,7 +601,7 @@
                                 <td>
                                     {% if m.conjunto_medicion == 'externo' %}
                                         <span class="badge-suave badge-suave-warning">{{ m.get_conjunto_medicion_display }}</span>
-                                        <div class="small text-muted">No comparable con las filas de la microempresa</div>
+                                        <div class="small text-muted"></div>
                                     {% else %}
                                         {{ m.get_conjunto_medicion_display|default:"—" }}
                                     {% endif %}

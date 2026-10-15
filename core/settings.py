@@ -184,6 +184,15 @@ ANOMALIA_UMBRAL_MEDIA = config('ANOMALIA_UMBRAL_MEDIA', default=0.40, cast=float
 # de correr la evaluación y no se ajusta según el resultado.
 PRONOSTICO_TOLERANCIA_RELATIVA = config('PRONOSTICO_TOLERANCIA_RELATIVA', default=0.20, cast=float)
 
+# Pantalla del modelo (/modelo/)
+# ------------------------------
+# Muestra u oculta, dentro del detalle técnico, la exactitud del pronóstico
+# del modelo en producción (ventana y diario), la comparación contra las tres
+# líneas base y el estudio de ablación. Solo cambia lo que se ve: los
+# reportes, los comandos evaluar_predicciones/evaluar_ablacion y el resumen
+# de arriba de la pantalla siguen igual. False por defecto.
+MODELO_MOSTRAR_EVALUACION = config('MODELO_MOSTRAR_EVALUACION', default=False, cast=bool)
+
 # Registro (logging)
 # ------------------
 # Los módulos de inventario escriben en consola desde WARNING (p. ej. las

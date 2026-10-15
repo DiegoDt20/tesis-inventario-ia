@@ -10,7 +10,12 @@ La evaluación y la ablación se leen de los reportes ya guardados
 
 Arriba va un resumen sin jerga para el dueño (la exactitud en la ventana de
 reposición, con semáforo por categoría); todo el detalle técnico queda en
-una sección plegada, cerrada en cada visita."""
+una sección plegada, cerrada en cada visita.
+
+La evaluación por horizonte (con las líneas base) y la ablación del detalle
+se muestran solo con settings.MODELO_MOSTRAR_EVALUACION (False por
+defecto); el resumen de arriba lee el mismo reporte siempre."""
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Max, Min
@@ -47,6 +52,7 @@ def modelo_detalle(request):
         escaladas = {s: f for s, f in produccion.escalado.get('factores', {}).items() if f != 1.0}
     pagina = Paginator(ModeloEntrenado.objects.order_by('-fecha_entrenamiento'), 20).get_page(request.GET.get('page'))
     evaluacion = evaluacion_vigente(produccion)
+    mostrar_evaluacion = settings.MODELO_MOSTRAR_EVALUACION
     contexto = {
         'resumen': resumen_pronostico(evaluacion),
         # Cerrado en cada visita; solo queda abierto al moverse por las
@@ -56,8 +62,11 @@ def modelo_detalle(request):
         'base': base,
         'series_escaladas': escaladas,
         'dias_historico': _dias_historico(Origen.REAL),
+        # El resumen y su aviso usan la evaluación siempre; la variable solo
+        # decide si sus tablas y la ablación aparecen en el detalle.
         'evaluacion': evaluacion,
-        'ablacion': ablacion_vigente(),
+        'mostrar_evaluacion': mostrar_evaluacion,
+        'ablacion': ablacion_vigente() if mostrar_evaluacion else None,
         'pagina': pagina,
     }
     return render(request, 'inventario/modelo.html', contexto)

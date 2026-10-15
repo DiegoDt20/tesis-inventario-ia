@@ -183,6 +183,7 @@ ni se ponen credenciales directamente en `core/settings.py`.
 | `LLM_URL`              | URL base de la API del proveedor (sin `/api/chat`).                                   | `http://localhost:11434`             |
 | `EMPRESA_RAZON_SOCIAL` | Opcional: si se define, el anonimizador la redacta antes de enviarla al LLM.          | *(vacío)*                            |
 | `PRONOSTICO_TOLERANCIA_RELATIVA` | Tolerancia del acierto del pronóstico: un día acierta si \|real − pronóstico\| / max(real, 1) ≤ este valor. Ver [Exactitud del pronóstico](#exactitud-del-pronóstico). | `0.20` |
+| `MODELO_MOSTRAR_EVALUACION` | En `/modelo/`, muestra (`True`) u oculta (`False`) dentro del detalle técnico la exactitud del pronóstico por horizonte, la comparación con las tres líneas base y el estudio de ablación. Ver [Pantalla del modelo](#pantalla-del-modelo-modelo). | `False` |
 
 ## Comandos de gestión
 
@@ -1118,7 +1119,21 @@ métricas por horizonte, líneas base, prueba de signos, ablación e
 historial) está dentro de "Detalle técnico de la investigación", un
 `<details>` cerrado en cada visita: se abre con un clic y no se recuerda el
 estado. Solo queda abierto al moverse por las páginas del historial, que
-está dentro. El contenido del detalle es el mismo que antes:
+está dentro.
+
+**Secciones ocultas por defecto (15/10/2026).** Con
+`MODELO_MOSTRAR_EVALUACION=False` (el valor por defecto), el detalle
+muestra solo tres bloques: modelo en producción, modelo base e historial.
+La exactitud del pronóstico del modelo en producción (ventana y diario), la
+comparación contra las tres líneas base (con la prueba de signos) y el
+estudio de ablación quedan ocultos, no borrados: su código sigue en
+`modelo.html`, y `servicios/reportes_modelo.py`, los comandos
+`evaluar_predicciones` y `evaluar_ablacion` y sus tests no cambiaron. Para
+volver a mostrarlos basta con poner `MODELO_MOSTRAR_EVALUACION=True` en el
+`.env`. El resumen de arriba (porcentaje, barras por categoría y gráfico)
+no depende de la variable y sigue leyendo el mismo reporte.
+
+El contenido completo del detalle (con la variable en `True`) es:
 
 Es la documentación técnica de la investigación en el sistema (la que se
 mostraría en una sustentación), separada del dashboard operativo. Desde el

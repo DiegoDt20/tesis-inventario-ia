@@ -106,6 +106,14 @@ indicadores.
   vez de un número, sin gráfico. Todo el detalle técnico está en un
   `<details>` cerrado en cada visita (abierto solo con `?page=` del
   historial).
+  Dentro del detalle, la exactitud por horizonte (ventana y diario), la
+  comparación con las tres líneas base y la ablación se muestran solo con
+  `MODELO_MOSTRAR_EVALUACION=True` (decouple, por defecto `False`; tests
+  `VisibilidadEvaluacionTests`). Con `False` quedan modelo en producción,
+  modelo base e historial. Es ocultar, no borrar: el código de esas
+  secciones, `reportes_modelo.py`, `evaluar_predicciones`/`evaluar_ablacion`
+  y sus tests siguen igual, y el resumen de arriba no depende de la
+  variable.
 - `inventario/tests/` — paquete de tests, un archivo `test_*.py` por área
   (p. ej. `test_carga_datos.py`, `test_ml.py`, `test_vistas.py`).
 - `artefactos/modelos_ml/` — modelos de XGBoost entrenados (`.json`), no se

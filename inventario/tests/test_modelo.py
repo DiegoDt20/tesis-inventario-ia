@@ -2,7 +2,9 @@
 conjunto de medición de cada modelo (y su migración), etiquetas de los
 modelos vigentes, lectura de los reportes guardados de evaluación y de
 ablación (el más reciente, degradando si falta alguno), advertencias y
-marca del enfoque por producto descartado."""
+marca del enfoque por producto descartado. La evaluación y la ablación del
+detalle solo se muestran con MODELO_MOSTRAR_EVALUACION (False por defecto):
+los tests de su contenido la activan."""
 import json
 import re
 import tempfile
@@ -12,7 +14,7 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
 from ..models import ModeloEntrenado
@@ -168,6 +170,7 @@ class _PantallaBase(TestCase):
         return respuesta.content.decode()
 
 
+@override_settings(MODELO_MOSTRAR_EVALUACION=True)
 class PantallaModeloTests(_PantallaBase):
     def test_muestra_el_reporte_mas_reciente_de_cada_uno(self):
         self._escribir(self.dir_evaluacion, 'evaluacion_walkforward_20261002_060705.json',
@@ -285,6 +288,7 @@ class ResumenPantallaTests(_PantallaBase):
     def _resumen(self, html):
         return html[html.index('resumen-pronostico'):html.index('<details')]
 
+    @override_settings(MODELO_MOSTRAR_EVALUACION=True)
     def test_mismo_valor_que_la_tabla_de_ventana_y_del_mismo_reporte(self):
         self._con_reporte()
         respuesta = self.client.get(reverse('inventario:modelo_detalle'))
@@ -332,10 +336,9 @@ class ResumenPantallaTests(_PantallaBase):
         self.assertIn('<details class="detalle-tecnico">', html)
         self.assertNotIn('<details class="detalle-tecnico" open>', html)
         self.assertIn('Detalle técnico de la investigación', html)
-        # Todo el detalle sigue estando, adentro.
+        # Los bloques visibles por defecto están adentro.
         detalle = html[html.index('<details'):html.index('</details>')]
-        for texto in ('Modelo en producción', 'Contra las tres líneas base', 'Estudio de ablación',
-                      'Historial de modelos entrenados', ADVERTENCIA_R2):
+        for texto in ('Modelo en producción', 'Modelo base', 'Historial de modelos entrenados'):
             self.assertIn(texto, detalle)
         # Moverse por las páginas del historial lo deja abierto.
         respuesta = self.client.get(reverse('inventario:modelo_detalle') + '?page=1')
@@ -355,6 +358,54 @@ class ResumenPantallaTests(_PantallaBase):
         self.assertIn('La evaluación guardada es de un modelo anterior (#999)', resumen)
         self.assertNotIn('resumen-numero', resumen)
         self.assertNotIn('79,4', resumen)
+
+
+
+class VisibilidadEvaluacionTests(_PantallaBase):
+    """MODELO_MOSTRAR_EVALUACION oculta (False, por defecto) o muestra (True)
+    la evaluación por horizonte, las líneas base y la ablación del detalle,
+    sin tocar los tres bloques fijos ni el resumen de arriba."""
+
+    # Textos propios de cada sección oculta: los dos horizontes, la
+    # comparación con las líneas base y la ablación.
+    OCULTABLES = (
+        'Exactitud del pronóstico del modelo en producción', 'Ventana de lead time', 'Diario',
+        'Contra las tres líneas base', 'Estudio de ablación', ADVERTENCIA_R2, ADVERTENCIA_SIGNOS,
+    )
+    FIJOS = ('Modelo en producción', 'Modelo base', 'Historial de modelos entrenados')
+
+    def setUp(self):
+        super().setUp()
+        self._escribir(self.dir_evaluacion, 'evaluacion_walkforward_20261004_041640.json',
+                       _evaluacion(0.836, modelo=self.produccion.pk, exactitud_diario=0.488))
+        self._escribir(self.dir_ablacion, 'ablacion_20261004_051044.json', _ablacion(0.836))
+
+    def _detalle(self):
+        html = self._html()
+        return html, html[html.index('<details'):html.index('</details>')]
+
+    @override_settings(MODELO_MOSTRAR_EVALUACION=False)
+    def test_con_false_las_secciones_no_aparecen(self):
+        html, detalle = self._detalle()
+        for texto in self.OCULTABLES:
+            self.assertNotIn(texto, html)
+        self.assertNotIn('ablacion_20261004_051044.json', html)
+        self.assertNotIn('48,8', html)
+        for texto in self.FIJOS:
+            self.assertIn(texto, detalle)
+        # El resumen de arriba sigue leyendo el mismo reporte.
+        self.assertIn('<div class="resumen-numero">83,6\xa0%</div>', html)
+
+    @override_settings(MODELO_MOSTRAR_EVALUACION=True)
+    def test_con_true_las_secciones_aparecen(self):
+        html, detalle = self._detalle()
+        for texto in self.OCULTABLES:
+            self.assertIn(texto, detalle)
+        self.assertIn('ablacion_20261004_051044.json', detalle)
+        self.assertIn('48,8\xa0%', detalle)
+        for texto in self.FIJOS:
+            self.assertIn(texto, detalle)
+        self.assertIn('<div class="resumen-numero">83,6\xa0%</div>', html)
 
 
 # Ventanas tal como las guarda evaluar_predicciones. La primera de accesorio
