@@ -50,6 +50,16 @@ def calcular_ns(fecha_inicio=None, fecha_fin=None, origen=None):
 
     Devuelve {'valor': float|None, 'a_tiempo': int, 'total': int}.
     """
+    qs = _pedidos_del_periodo(fecha_inicio, fecha_fin, origen)
+    total = qs.count()
+    a_tiempo = qs.filter(atendido_a_tiempo=True).count()
+    valor = (a_tiempo / total * 100) if total else None
+    return {'valor': valor, 'a_tiempo': a_tiempo, 'total': total}
+
+
+def _pedidos_del_periodo(fecha_inicio=None, fecha_fin=None, origen=None):
+    """PedidoDetalle del rango (por Pedido.fecha_solicitud) y del origen: la
+    misma base para NS y para el bloque PD del COI."""
     qs = PedidoDetalle.objects.all()
     if origen:
         qs = qs.filter(pedido__origen=origen)
@@ -57,32 +67,49 @@ def calcular_ns(fecha_inicio=None, fecha_fin=None, origen=None):
         qs = qs.filter(pedido__fecha_solicitud__date__gte=fecha_inicio)
     if fecha_fin:
         qs = qs.filter(pedido__fecha_solicitud__date__lte=fecha_fin)
+    return qs
 
-    total = qs.count()
-    a_tiempo = qs.filter(atendido_a_tiempo=True).count()
-    valor = (a_tiempo / total * 100) if total else None
-    return {'valor': valor, 'a_tiempo': a_tiempo, 'total': total}
+
+def lineas_desabastecimiento(fecha_inicio=None, fecha_fin=None, origen=None):
+    """Las líneas que entran en las pérdidas por desabastecimiento (PD) del
+    COI: PedidoDetalle del rango con cantidad atendida menor que la
+    solicitada. Es la misma lista que la hoja 3_COI_PD de la ficha, así que
+    sirve para cuadrar el PD línea por línea (comando reporte_indicadores
+    --detalle)."""
+    return _pedidos_del_periodo(fecha_inicio, fecha_fin, origen).filter(
+        cantidad_atendida__lt=F('cantidad_solicitada'),
+    )
 
 
 def calcular_coi(fecha_inicio=None, fecha_fin=None, origen=None):
     """Costos operativos de inventario:
 
-        COI = costos de almacenamiento + pérdidas por desabastecimiento
+        COI = CA + PD
+        CA  = suma de CostoAlmacenamiento.monto del periodo
+        PD  = Σ (cantidad solicitada − cantidad atendida) × margen unitario
 
-    Costos de almacenamiento: suma de CostoAlmacenamiento.monto en el rango
-    (filtrado por periodo_mes). Pérdidas por desabastecimiento: para cada
-    PedidoDetalle no atendido por completo en el rango (filtrado por
-    Pedido.fecha_solicitud), (cantidad no atendida) * margen unitario de la
-    línea (precio_venta_unitario - costo_compra_unitario). Son el precio y
-    el costo congelados al registrar el pedido, NO los actuales del
-    Producto: así el COI de un periodo ya medido (el pretest) no cambia
+    CA: costos de almacenamiento, filtrados por periodo_mes (un registro por
+    concepto y mes; el modelo no guarda una ventana más fina que el mes).
+    PD: pérdidas por desabastecimiento, una por cada PedidoDetalle no
+    atendido por completo en el rango (filtrado por Pedido.fecha_solicitud),
+    valorizada al margen unitario de la línea (precio_venta_unitario -
+    costo_compra_unitario). Es la utilidad no percibida, no el precio de
+    venta: si la venta se hubiera hecho, también se habría incurrido en el
+    costo de compra (Silver, Pyke & Peterson; Chopra & Meindl). Son el
+    precio y el costo congelados al registrar el pedido, NO los actuales
+    del Producto: así el COI de un periodo ya medido (el pretest) no cambia
     cuando después se actualizan precios.
 
     Devuelve {'valor': Decimal, 'almacenamiento': Decimal,
-    'desabastecimiento': Decimal, 'tiene_datos': bool}. valor siempre es un
-    Decimal (0.00 si no hay nada que sumar): a diferencia de EI/NS, "cero
-    costos" es una suma válida, no una ausencia de medición. Para
-    distinguir "no hubo datos este periodo" se usa 'tiene_datos'.
+    'desabastecimiento': Decimal, 'tiene_datos': bool} y el desglose para
+    cuadrar contra la ficha: 'conceptos_almacenamiento' (lista de dicts
+    periodo_mes/concepto/monto), 'lineas_desabastecimiento',
+    'unidades_no_atendidas', 'productos_afectados' y
+    'lineas_precio_reconstruido' (líneas del PD cuyo precio congelado es
+    una reconstrucción, ver PedidoDetalle.precios_reconstruidos). valor
+    siempre es un Decimal (0.00 si no hay nada que sumar): a diferencia de
+    EI/NS, "cero costos" es una suma válida, no una ausencia de medición.
+    Para distinguir "no hubo datos este periodo" se usa 'tiene_datos'.
     """
     costos_qs = CostoAlmacenamiento.objects.all()
     if origen:
@@ -91,24 +118,19 @@ def calcular_coi(fecha_inicio=None, fecha_fin=None, origen=None):
         costos_qs = costos_qs.filter(periodo_mes__gte=fecha_inicio)
     if fecha_fin:
         costos_qs = costos_qs.filter(periodo_mes__lte=fecha_fin)
-    almacenamiento = costos_qs.aggregate(total=Sum('monto'))['total'] or Decimal('0.00')
+    conceptos = list(costos_qs.order_by('periodo_mes', 'pk').values('periodo_mes', 'concepto', 'monto'))
+    almacenamiento = sum((c['monto'] for c in conceptos), Decimal('0.00'))
 
-    pedidos_qs = PedidoDetalle.objects.all()
-    if origen:
-        pedidos_qs = pedidos_qs.filter(pedido__origen=origen)
-    if fecha_inicio:
-        pedidos_qs = pedidos_qs.filter(pedido__fecha_solicitud__date__gte=fecha_inicio)
-    if fecha_fin:
-        pedidos_qs = pedidos_qs.filter(pedido__fecha_solicitud__date__lte=fecha_fin)
-
-    detalles_qs = pedidos_qs.filter(
-        cantidad_atendida__lt=F('cantidad_solicitada'),
-    ).values_list('cantidad_solicitada', 'cantidad_atendida', 'precio_venta_unitario', 'costo_compra_unitario')
+    pedidos_qs = _pedidos_del_periodo(fecha_inicio, fecha_fin, origen)
+    detalles = list(lineas_desabastecimiento(fecha_inicio, fecha_fin, origen).values_list(
+        'cantidad_solicitada', 'cantidad_atendida', 'precio_venta_unitario',
+        'costo_compra_unitario', 'producto_id', 'precios_reconstruidos',
+    ))
 
     desabastecimiento = sum(
         (
             (solicitada - atendida) * (precio_venta - costo_compra)
-            for solicitada, atendida, precio_venta, costo_compra in detalles_qs
+            for solicitada, atendida, precio_venta, costo_compra, _, _ in detalles
         ),
         Decimal('0.00'),
     )
@@ -119,7 +141,12 @@ def calcular_coi(fecha_inicio=None, fecha_fin=None, origen=None):
         'desabastecimiento': desabastecimiento,
         # Si no hubo ni costos de almacenamiento ni pedidos ese periodo, no
         # hubo nada que medir (distinto de haber medido y dar cero).
-        'tiene_datos': costos_qs.exists() or pedidos_qs.exists(),
+        'tiene_datos': bool(conceptos) or pedidos_qs.exists(),
+        'conceptos_almacenamiento': conceptos,
+        'lineas_desabastecimiento': len(detalles),
+        'unidades_no_atendidas': sum(d[0] - d[1] for d in detalles),
+        'productos_afectados': len({d[4] for d in detalles}),
+        'lineas_precio_reconstruido': sum(1 for d in detalles if d[5]),
     }
 
 

@@ -72,6 +72,8 @@
                     {{ fecha_inicio|date:'d/m/Y' }} – {{ fecha_fin|date:'d/m/Y' }} ·
                     almacenamiento S/ {{ coi.almacenamiento|floatformat:2 }} +
                     desabastecimiento S/ {{ coi.desabastecimiento|floatformat:2 }}
+                    ({{ coi.lineas_desabastecimiento }} línea{{ coi.lineas_desabastecimiento|pluralize }},
+                    {{ coi.unidades_no_atendidas }} u. no atendida{{ coi.unidades_no_atendidas|pluralize }})
                 </p>
             </div>
         </div>

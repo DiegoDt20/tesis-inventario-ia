@@ -237,7 +237,15 @@ class CargarDatosCommandTests(TestCase):
         # Indicadores calculados desde la base de datos.
         self.assertIn('EI (exactitud del inventario): 66.67%', texto_salida)
         self.assertIn('NS (nivel de servicio):        66.67%', texto_salida)
-        self.assertIn('S/ 350.00', texto_salida)
+        # COI = CA 350 + PD 30: la línea del pedido 2 (6 u. no atendidas)
+        # congela el precio y el costo de su fila en 3_COI_PD (10 − 5), no
+        # el 0 que tenía el producto recién creado al importar.
+        self.assertIn('COI (costos operativos de inventario): S/ 380.00', texto_salida)
+        self.assertIn('almacenamiento S/ 350.00 + desabastecimiento S/ 30.00', texto_salida)
+        self.assertEqual(
+            (detalle_parcial.precio_venta_unitario, detalle_parcial.costo_compra_unitario),
+            (Decimal('10.00'), Decimal('5.00')),
+        )
 
     def test_fecha_invalida_no_rompe_la_carga(self):
         # "Fecha de atención" del pedido 1 llega ilegible: la carga no debe

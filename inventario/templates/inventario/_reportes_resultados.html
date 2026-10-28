@@ -86,6 +86,56 @@
     </div>
 </div>
 
+<!-- Desglose del COI: CA y PD por separado, con el periodo y el número de
+     líneas, para cuadrarlo contra la ficha 3 línea por línea (el detalle de
+     cada línea lo lista "reporte_indicadores --detalle"). -->
+<div class="card mb-4" id="desglose-coi">
+    <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-cash-stack me-1"></i> Desglose del COI</h6>
+        <p class="text-muted small mb-3">
+            Del {{ fecha_inicio|date:'d/m/Y' }} al {{ fecha_fin|date:'d/m/Y' }}.
+            COI = CA + PD.
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0 tabla-compacta">
+                <tbody>
+                    <tr>
+                        <td>
+                            <strong>CA</strong> — suma de costos de almacenamiento del periodo
+                            <div class="small text-muted">
+                                {{ coi.conceptos_almacenamiento|length }} concepto{{ coi.conceptos_almacenamiento|length|pluralize }}
+                            </div>
+                        </td>
+                        <td class="text-end text-nowrap">S/ {{ coi.almacenamiento|floatformat:2 }}</td>
+                    </tr>
+                    {% for c in coi.conceptos_almacenamiento %}
+                        <tr class="small text-muted">
+                            <td class="ps-4">{{ c.periodo_mes|date:'m/Y' }} · {{ c.concepto }}</td>
+                            <td class="text-end text-nowrap">S/ {{ c.monto|floatformat:2 }}</td>
+                        </tr>
+                    {% endfor %}
+                    <tr>
+                        <td>
+                            <strong>PD</strong> — Σ (solicitada − atendida) × margen unitario
+                            <div class="small text-muted">
+                                {{ coi.lineas_desabastecimiento }} línea{{ coi.lineas_desabastecimiento|pluralize }} no atendida{{ coi.lineas_desabastecimiento|pluralize }} por completo ·
+                                {{ coi.unidades_no_atendidas }} unidad{{ coi.unidades_no_atendidas|pluralize:"es" }} ·
+                                {{ coi.productos_afectados }} producto{{ coi.productos_afectados|pluralize }} ·
+                                margen = precio de venta − costo de compra congelados en cada línea
+                            </div>
+                        </td>
+                        <td class="text-end text-nowrap">S/ {{ coi.desabastecimiento|floatformat:2 }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>COI</strong></td>
+                        <td class="text-end text-nowrap"><strong>S/ {{ coi.valor|floatformat:2 }}</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <!-- Composición del catálogo: qué se vende (categorías) y qué se pide más
      (ranking de demanda), lado a lado. -->
 <div class="row g-3 mb-4">

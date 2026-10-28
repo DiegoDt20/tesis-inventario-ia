@@ -2,7 +2,7 @@
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,7 +11,6 @@ from openpyxl.utils.datetime import from_excel
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 
 from inventario.servicios.indicadores import calcular_coi, calcular_ei, calcular_ns
@@ -35,6 +34,12 @@ USUARIO_IMPORTACION = 'importador_datos'
 # como celda de fecha nativa de Excel.
 FORMATOS_FECHA_TEXTO = ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%y')
 
+# Periodo declarado en la columna "Periodo" de 3_COI_CA, p. ej.
+# "25/07/2026–24/08/2026" (guion largo, corto o "al" entre las dos fechas).
+PATRON_PERIODO = re.compile(
+    r'(\d{1,2}/\d{1,2}/\d{4})\s*(?:[–—-]|al)\s*(\d{1,2}/\d{1,2}/\d{4})'
+)
+
 
 class FilaInvalida(Exception):
     """Señala que una fila debe omitirse porque algún valor no tiene el tipo
@@ -53,6 +58,11 @@ class Resumen:
     filas_omitidas: int = 0
     advertencias: list = field(default_factory=list)
     fechas_invalidas: list = field(default_factory=list)
+    # Meses (primer día) en los que este archivo dejó datos de algún
+    # indicador: conteos (EI), pedidos (NS y PD) y costos (CA). Sirven para
+    # no mezclar periodos (ver Command._verificar_periodos) y para reportar
+    # los indicadores solo del periodo cargado.
+    meses_cargados: set = field(default_factory=set)
 
     def advertir(self, texto):
         self.advertencias.append(texto)
@@ -130,6 +140,11 @@ class Command(BaseCommand):
                 )
             )
 
+        # Meses que ya tenían datos de este origen ANTES de la carga: con
+        # ellos se impide que el archivo se mezcle con un periodo ya medido
+        # (p. ej. el postest con el pretest), ver _verificar_periodos.
+        meses_previos = self._meses_con_datos(origen)
+
         with transaction.atomic():
             if limpiar:
                 self._limpiar_origen(origen)
@@ -138,21 +153,34 @@ class Command(BaseCommand):
             productos_por_codigo = {}
             productos_por_descripcion = {}
 
+            # 3_COI_PD se lee antes que 2_NS porque trae el precio y el costo
+            # de cada línea no atendida en el periodo de la ficha: son los
+            # que se congelan en PedidoDetalle al crearla (no el precio que
+            # el producto tenga en el catálogo al momento de importar).
+            filas_pd = self._leer_coi_pd(libro['3_COI_PD'], resumen)
+            precios_por_pedido = {}
+            for fila_pd in filas_pd:
+                precios_por_pedido.setdefault(
+                    fila_pd['numero_pedido'], (fila_pd['precio_venta'], fila_pd['costo_compra']),
+                )
+
             fecha_corte_ei = self._cargar_ei(
                 libro['1_EI'], origen, usuario, productos_por_codigo,
                 productos_por_descripcion, resumen,
             )
             pedidos_por_numero = self._cargar_ns(
                 libro['2_NS'], origen, productos_por_codigo,
-                productos_por_descripcion, resumen,
+                productos_por_descripcion, resumen, precios_por_pedido,
             )
-            self._cargar_coi_ca(libro['3_COI_CA'], origen, fecha_corte_ei, resumen)
-            self._cargar_coi_pd(
-                libro['3_COI_PD'], pedidos_por_numero, productos_por_codigo, resumen,
+            self._cargar_coi_ca(
+                libro['3_COI_CA'], origen, fecha_corte_ei, resumen, pedidos_por_numero,
             )
+            self._cargar_coi_pd(filas_pd, pedidos_por_numero, productos_por_codigo, resumen)
+
+            self._verificar_periodos(origen, meses_previos, resumen.meses_cargados, limpiar)
 
             self._imprimir_resumen(resumen)
-            self._imprimir_indicadores(origen)
+            self._imprimir_indicadores(origen, resumen.meses_cargados)
 
             if dry_run:
                 transaction.set_rollback(True)
@@ -259,6 +287,63 @@ class Command(BaseCommand):
             usuario.set_unusable_password()
             usuario.save(update_fields=['password'])
         return usuario
+
+    @staticmethod
+    def _meses_con_datos(origen):
+        """Meses (primer día) con datos de algún indicador del origen:
+        conteos físicos (EI), pedidos (NS y PD) y costos de almacenamiento
+        (CA). Los movimientos no cuentan: no entran en ningún indicador."""
+        meses = set(
+            ConteoFisico.objects.filter(origen=origen).dates('fecha_corte', 'month')
+        )
+        meses.update(
+            momento.date() for momento in Pedido.objects.filter(origen=origen).datetimes(
+                'fecha_solicitud', 'month', tzinfo=timezone.get_current_timezone(),
+            )
+        )
+        meses.update(
+            CostoAlmacenamiento.objects.filter(origen=origen).dates('periodo_mes', 'month')
+        )
+        return meses
+
+    @staticmethod
+    def _verificar_periodos(origen, meses_previos, meses_cargados, limpiar):
+        """Impide que una carga cambie un periodo ya medido de este origen
+        (lo que congela el pretest al importar el postest). Lanza
+        CommandError dentro de la transacción, así que no queda nada
+        escrito:
+
+        - sin --limpiar, el archivo no puede traer datos de un mes que ya
+          tenía datos del mismo origen (se sumarían a ese periodo y
+          cambiarían sus indicadores);
+        - con --limpiar, que borra TODO el origen, el archivo tiene que
+          volver a cargar todos los meses que había; si no, --limpiar
+          estaría borrando otro periodo (p. ej. el pretest al cargar el
+          postest con --limpiar).
+        """
+        def formatear(meses):
+            return ', '.join(m.strftime('%m/%Y') for m in sorted(meses))
+
+        if limpiar:
+            perdidos = meses_previos - meses_cargados
+            if perdidos:
+                raise CommandError(
+                    f'--limpiar borraría los datos de origen "{origen}" de {formatear(perdidos)}, '
+                    f'que este archivo no vuelve a cargar (solo trae {formatear(meses_cargados) or "nada"}). '
+                    'No se escribió nada. Para cargar un periodo nuevo sin tocar los '
+                    'anteriores, ejecútalo sin --limpiar.'
+                )
+            return
+
+        solapados = meses_previos & meses_cargados
+        if solapados:
+            raise CommandError(
+                f'El archivo trae datos de {formatear(solapados)}, y ya hay datos de origen '
+                f'"{origen}" en ese mes: se sumarían a ese periodo y cambiarían sus '
+                'indicadores. No se escribió nada. Revisa las fechas del archivo (p. ej. '
+                'pedidos del postest con fecha del pretest) o, si de verdad quieres '
+                'reemplazar ese periodo, restaura el respaldo previo a su carga.'
+            )
 
     def _limpiar_origen(self, origen):
         """Borra los datos previos del origen indicado, respetando el orden
@@ -464,6 +549,7 @@ class Command(BaseCommand):
                 )
                 conteos_por_fecha[fecha_corte] = conteo
                 resumen.conteos_creados += 1
+                resumen.meses_cargados.add(fecha_corte.replace(day=1))
 
             ConteoDetalle.objects.create(
                 conteo=conteo,
@@ -495,7 +581,14 @@ class Command(BaseCommand):
 
     def _cargar_ns(
         self, hoja, origen, productos_por_codigo, productos_por_descripcion, resumen,
+        precios_por_pedido=None,
     ):
+        """Crea un Pedido con su PedidoDetalle por fila. precios_por_pedido
+        ({N.° de pedido: (precio_venta, costo_compra)}, leído de 3_COI_PD)
+        fija el precio y el costo congelados de las líneas no atendidas por
+        completo; las demás congelan el precio del producto al importar
+        (no entran en el PD)."""
+        precios_por_pedido = precios_por_pedido or {}
         nombre_hoja = '2_NS'
         fila_encabezado = self._encontrar_fila_encabezado(hoja, nombre_hoja)
         columnas = self._mapear_columnas(
@@ -508,6 +601,7 @@ class Command(BaseCommand):
                 'descripcion': ['producto y presentacion'],
                 'cantidad_solicitada': ['cant solicitada', 'cantidad solicitada'],
                 'cantidad_atendida': ['cant atendida', 'cantidad atendida'],
+                'fecha_requerida': ['fecha requerida'],
                 'fecha_atencion': ['fecha de atencion'],
                 'a_tiempo': ['a tiempo 1 0', 'a tiempo'],
             },
@@ -542,6 +636,12 @@ class Command(BaseCommand):
                 resumen, nombre_hoja, fila, 'Fecha de atención',
             )
             a_tiempo = hoja.cell(row=fila, column=columnas['a_tiempo']).value
+            fecha_requerida = (
+                self._a_fecha(
+                    hoja.cell(row=fila, column=columnas['fecha_requerida']).value,
+                    resumen, nombre_hoja, fila, 'Fecha requerida',
+                ) if 'fecha_requerida' in columnas else None
+            )
 
             if fecha_pedido is None or cantidad_solicitada_valor is None:
                 resumen.filas_omitidas += 1
@@ -570,6 +670,12 @@ class Command(BaseCommand):
             if cantidad_atendida < cantidad_solicitada:
                 motivo_no_atencion = PedidoDetalle.MotivoNoAtencion.SIN_STOCK
 
+            a_tiempo = self._resolver_a_tiempo(
+                a_tiempo, cantidad_solicitada, cantidad_atendida, fecha_requerida,
+                fecha_atencion, resumen, nombre_hoja, fila,
+            )
+            precio_venta_unitario, costo_compra_unitario = precios_por_pedido.get(numero, (None, None))
+
             pedido = Pedido.objects.create(
                 fecha_solicitud=fecha_pedido,
                 cliente=str(cliente or ''),
@@ -587,20 +693,61 @@ class Command(BaseCommand):
                 producto=producto,
                 cantidad_solicitada=cantidad_solicitada,
                 cantidad_atendida=cantidad_atendida,
+                fecha_requerida=fecha_requerida,
                 fecha_atencion=fecha_atencion,
-                atendido_a_tiempo=bool(a_tiempo),
+                atendido_a_tiempo=a_tiempo,
                 motivo_no_atencion=motivo_no_atencion,
+                # None = el save() congela el precio actual del producto.
+                precio_venta_unitario=precio_venta_unitario,
+                costo_compra_unitario=costo_compra_unitario,
             )
             resumen.pedidos_creados += 1
+            resumen.meses_cargados.add(timezone.localdate(fecha_pedido).replace(day=1))
             pedidos_por_numero[numero] = pedido
 
         return pedidos_por_numero
+
+    @staticmethod
+    def _resolver_a_tiempo(
+        a_tiempo, solicitada, atendida, fecha_requerida, fecha_atencion,
+        resumen, nombre_hoja, fila,
+    ):
+        """Valor de atendido_a_tiempo. Manda la columna "¿A tiempo? (1/0)"
+        de la ficha; si la fecha requerida está, se contrasta con el
+        criterio de la ficha (1 solo si se entrega la cantidad completa en
+        la fecha requerida o antes) y una discrepancia queda como
+        advertencia. Si la celda viene vacía (fórmula sin valor calculado,
+        p. ej. un archivo generado por script que nunca se abrió en Excel),
+        se usa el criterio en vez de contar el pedido como "no a tiempo"."""
+        criterio = None
+        if fecha_requerida is not None:
+            criterio = (
+                atendida >= solicitada
+                and fecha_atencion is not None
+                and timezone.localdate(fecha_atencion) <= fecha_requerida
+            )
+        if a_tiempo is None or a_tiempo == '':
+            if criterio is None:
+                return False
+            resumen.advertir(
+                f'{nombre_hoja} fila {fila}: "¿A tiempo?" vacío; se calculó con la '
+                f'fecha requerida y la de atención ({int(criterio)}).'
+            )
+            return criterio
+        valor = bool(a_tiempo)
+        if criterio is not None and valor != criterio:
+            resumen.advertir(
+                f'{nombre_hoja} fila {fila}: "¿A tiempo?" dice {int(valor)}, pero con la '
+                f'fecha requerida y la de atención el criterio da {int(criterio)}; se '
+                'conservó el valor de la ficha.'
+            )
+        return valor
 
     # ------------------------------------------------------------------
     # 3_COI_CA - Costos de almacenamiento
     # ------------------------------------------------------------------
 
-    def _cargar_coi_ca(self, hoja, origen, fecha_corte_ei, resumen):
+    def _cargar_coi_ca(self, hoja, origen, fecha_corte_ei, resumen, pedidos_por_numero=None):
         nombre_hoja = '3_COI_CA'
         # Esta hoja no numera filas con "N.°": su primera columna es
         # "Componente", así que se usa ese texto como marcador de encabezado.
@@ -610,14 +757,17 @@ class Command(BaseCommand):
             alias_por_columna={
                 'componente': ['componente'],
                 'detalle': ['detalle del calculo'],
+                'periodo': ['periodo'],
                 'monto': ['monto s', 'monto'],
             },
             requeridas=['componente', 'monto'],
             nombre_hoja=nombre_hoja,
         )
 
-        # 3_COI_CA no trae un periodo propio; se usa el mes de la fecha de
-        # corte de 1_EI como referencia del periodo evaluado.
+        # CostoAlmacenamiento solo guarda el mes (periodo_mes): se usa el
+        # mes de la fecha de corte de 1_EI como referencia del periodo
+        # evaluado. La ventana exacta que declara la columna "Periodo" no se
+        # guarda; se contrasta con la de los pedidos (_contrastar_ventana_ca).
         if fecha_corte_ei is not None:
             periodo_mes = fecha_corte_ei.replace(day=1)
         else:
@@ -627,8 +777,13 @@ class Command(BaseCommand):
                 'se usó el mes actual para periodo_mes.'
             )
 
+        periodos_declarados = set()
         for fila in range(fila_encabezado + 1, hoja.max_row + 1):
             componente = hoja.cell(row=fila, column=columnas['componente']).value
+            if componente is not None and 'periodo' in columnas:
+                periodo_texto = hoja.cell(row=fila, column=columnas['periodo']).value
+                if periodo_texto:
+                    periodos_declarados.add(str(periodo_texto).strip())
             detalle = (
                 hoja.cell(row=fila, column=columnas['detalle']).value
                 if 'detalle' in columnas else None
@@ -661,6 +816,7 @@ class Command(BaseCommand):
                 origen=origen,
             )
             resumen.costos_creados += 1
+            resumen.meses_cargados.add(periodo_mes)
 
             # Nota: "Mermas del periodo" solo se registra como costo de
             # almacenamiento porque el Excel no trae el desglose por
@@ -672,16 +828,43 @@ class Command(BaseCommand):
                     f'(solo el CostoAlmacenamiento correspondiente).'
                 )
 
+        self._contrastar_ventana_ca(periodos_declarados, pedidos_por_numero, periodo_mes, resumen)
+
+    @staticmethod
+    def _contrastar_ventana_ca(periodos_declarados, pedidos_por_numero, periodo_mes, resumen):
+        """El COI suma CA + PD, así que ambos deben medir la misma ventana.
+        CostoAlmacenamiento solo guarda el mes (periodo_mes), así que la
+        ventana que la ficha declara en la columna "Periodo" de 3_COI_CA se
+        contrasta aquí con la de los pedidos de 2_NS (de donde sale el PD) y
+        una diferencia queda como advertencia; los montos no se tocan."""
+        if not periodos_declarados or not pedidos_por_numero:
+            return
+        fechas = [timezone.localdate(p.fecha_solicitud) for p in pedidos_por_numero.values()]
+        desde_pd, hasta_pd = min(fechas), max(fechas)
+        for texto in sorted(periodos_declarados):
+            coincidencia = PATRON_PERIODO.search(texto)
+            if not coincidencia:
+                resumen.advertir(f'3_COI_CA: no se pudo interpretar el periodo "{texto}".')
+                continue
+            desde_ca, hasta_ca = (
+                datetime.strptime(f, '%d/%m/%Y').date() for f in coincidencia.groups()
+            )
+            if (desde_ca, hasta_ca) != (desde_pd, hasta_pd):
+                resumen.advertir(
+                    f'3_COI_CA declara el periodo {desde_ca:%d/%m/%Y}–{hasta_ca:%d/%m/%Y}, '
+                    f'pero los pedidos de 2_NS (de los que sale el PD) van del '
+                    f'{desde_pd:%d/%m/%Y} al {hasta_pd:%d/%m/%Y}: CA y PD miden ventanas '
+                    f'distintas. Los costos se cargaron igual, en el mes {periodo_mes:%m/%Y}.'
+                )
+
     # ------------------------------------------------------------------
     # 3_COI_PD - Pérdidas por desabastecimiento
     # ------------------------------------------------------------------
 
-    def _cargar_coi_pd(self, hoja, pedidos_por_numero, productos_por_codigo, resumen):
-        """Valida, para cada pedido no atendido por completo, que la
-        cantidad no atendida coincida con la calculada en el sistema, y
-        actualiza precio_venta/costo_compra del producto con los valores de
-        esta hoja (son la fuente de esos precios; sin ellos, calcular_coi no
-        puede calcular la pérdida por desabastecimiento)."""
+    def _leer_coi_pd(self, hoja, resumen):
+        """Lee las filas de 3_COI_PD: N.° de pedido de la ficha 2, código,
+        cantidad no atendida, precio de venta y costo de compra. Las filas
+        con un valor no numérico se omiten con advertencia."""
         nombre_hoja = '3_COI_PD'
         fila_encabezado = self._encontrar_fila_encabezado(hoja, nombre_hoja)
         columnas = self._mapear_columnas(
@@ -700,6 +883,7 @@ class Command(BaseCommand):
             nombre_hoja=nombre_hoja,
         )
 
+        filas = []
         for fila in range(fila_encabezado + 1, hoja.max_row + 1):
             numero_pedido = hoja.cell(row=fila, column=columnas['numero_pedido']).value
             if numero_pedido is None:
@@ -726,7 +910,33 @@ class Command(BaseCommand):
                 resumen.filas_omitidas += 1
                 continue
 
-            codigo = str(codigo_valor).strip() if codigo_valor else None
+            filas.append({
+                'fila': fila,
+                'numero_pedido': numero_pedido,
+                'codigo': str(codigo_valor).strip() if codigo_valor else None,
+                'cantidad_no_atendida': cantidad_no_atendida_excel,
+                'precio_venta': precio_venta,
+                'costo_compra': costo_compra,
+            })
+        return filas
+
+    def _cargar_coi_pd(self, filas_pd, pedidos_por_numero, productos_por_codigo, resumen):
+        """Valida, para cada pedido no atendido por completo, que la
+        cantidad no atendida coincida con la calculada en el sistema, y
+        actualiza precio_venta/costo_compra del producto con los valores de
+        esta hoja. El precio y el costo de la LÍNEA ya quedaron congelados
+        con estos mismos valores al crearla (_cargar_ns); actualizar el
+        producto solo deja el catálogo con los precios del periodo cargado y
+        no cambia ninguna línea ya registrada."""
+        nombre_hoja = '3_COI_PD'
+        for fila_pd in filas_pd:
+            fila = fila_pd['fila']
+            numero_pedido = fila_pd['numero_pedido']
+            codigo = fila_pd['codigo']
+            precio_venta = fila_pd['precio_venta']
+            costo_compra = fila_pd['costo_compra']
+            cantidad_no_atendida_excel = fila_pd['cantidad_no_atendida']
+
             if codigo:
                 producto = productos_por_codigo.get(codigo) or Producto.objects.filter(codigo=codigo).first()
                 if producto is None:
@@ -786,20 +996,31 @@ class Command(BaseCommand):
         for hoja, fila, columna, valor in resumen.fechas_invalidas:
             self.stdout.write(f'  - {hoja} fila {fila}, columna "{columna}": valor "{valor}"')
 
-    def _imprimir_indicadores(self, origen):
+    def _imprimir_indicadores(self, origen, meses_cargados):
         """Calcula los tres indicadores desde la base de datos (no desde el
         Excel), para verificar que la importación no deformó los datos.
+        Solo del periodo que trajo el archivo (los meses en que dejó datos):
+        con el pretest ya cargado, mezclar los dos periodos no verificaría
+        nada.
 
         Usa inventario.servicios.indicadores (las mismas funciones que el dashboard),
         para que nunca haya dos cálculos distintos del mismo indicador."""
-        ei = calcular_ei(origen=origen)
-        ns = calcular_ns(origen=origen)
-        coi = calcular_coi(origen=origen)
+        if meses_cargados:
+            desde = min(meses_cargados)
+            ultimo = max(meses_cargados)
+            siguiente = (ultimo.replace(day=28) + timedelta(days=4)).replace(day=1)
+            hasta = siguiente - timedelta(days=1)
+        else:
+            desde = hasta = None
+        ei = calcular_ei(desde, hasta, origen=origen)
+        ns = calcular_ns(desde, hasta, origen=origen)
+        coi = calcular_coi(desde, hasta, origen=origen)
 
         ei_valor = ei['valor'] or 0.0
         ns_valor = ns['valor'] or 0.0
 
-        self.stdout.write(self.style.SUCCESS('\nIndicadores calculados desde la base de datos:'))
+        periodo = f' del {desde:%d/%m/%Y} al {hasta:%d/%m/%Y}' if desde else ''
+        self.stdout.write(self.style.SUCCESS(f'\nIndicadores calculados desde la base de datos{periodo}:'))
         self.stdout.write(f'  EI (exactitud del inventario): {ei_valor:.2f}% ({ei["correctos"]}/{ei["total"]})')
         self.stdout.write(f'  NS (nivel de servicio):        {ns_valor:.2f}% ({ns["a_tiempo"]}/{ns["total"]})')
         self.stdout.write(
@@ -807,14 +1028,18 @@ class Command(BaseCommand):
             f'(almacenamiento S/ {coi["almacenamiento"]:.2f} + '
             f'desabastecimiento S/ {coi["desabastecimiento"]:.2f})'
         )
+        self.stdout.write(
+            f'    CA: {len(coi["conceptos_almacenamiento"])} concepto(s) · '
+            f'PD: {coi["lineas_desabastecimiento"]} línea(s), '
+            f'{coi["unidades_no_atendidas"]} unidad(es) no atendida(s), '
+            f'{coi["productos_afectados"]} producto(s), al margen congelado de cada línea'
+        )
 
-        hay_no_atendidos = PedidoDetalle.objects.filter(
-            pedido__origen=origen, cantidad_atendida__lt=F('cantidad_solicitada'),
-        ).exists()
-        if coi['desabastecimiento'] == 0 and hay_no_atendidos:
+        if coi['desabastecimiento'] == 0 and coi['lineas_desabastecimiento']:
             self.stdout.write(self.style.WARNING(
-                '  Nota: la pérdida por desabastecimiento salió en 0 porque los '
-                'productos importados no tienen precio_venta/costo_compra '
-                '(3_COI_PD no pudo emparejar sus códigos con productos existentes). '
-                'Revisa las advertencias anteriores.'
+                '  Nota: la pérdida por desabastecimiento salió en 0 porque las líneas '
+                'no atendidas no tienen precio de venta/costo de compra (3_COI_PD no '
+                'trae esos pedidos y los productos no tenían precio al importar). '
+                'Revisa las advertencias anteriores y, si hace falta, completa con '
+                '"cargar_precios --completar-pedidos".'
             ))

@@ -116,6 +116,8 @@ Estas reglas son parte del diseño. Cambiarlas altera la validez de los indicado
 
 **Validación en la importación.** El importador verifica la coherencia entre las hojas de las fichas, detecta fechas inexistentes y reporta discrepancias antes de escribir. Todo se ejecuta en una transacción: si falla, no queda nada a medias.
 
+**Un periodo medido no se vuelve a tocar.** `cargar_datos` rechaza un archivo que traiga datos (conteos, pedidos o costos) de un mes que ya tiene datos del mismo origen, y un `--limpiar` que borraría meses que el archivo no vuelve a cargar. Así, importar el postest no puede cambiar el pretest. Ver [Importar el postest](#importar-el-postest).
+
 ## Stack
 
 - Python + Django 5.2
@@ -191,7 +193,9 @@ Todos se ejecutan con `python manage.py <comando>`.
 
 | Comando                 | Qué hace                                                                                                          | Parámetros                                                                 |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos.            | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar`, `--dry-run` |
+| `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos. Cada línea no atendida congela el precio y el costo de su fila en `3_COI_PD`. Rechaza datos de un mes ya cargado del mismo origen y un `--limpiar` que borraría otro periodo. Reporta los indicadores solo del periodo cargado, con el COI desglosado. | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar` (borra todo el origen; solo para recargar el mismo periodo), `--dry-run` |
+| `cargar_precios`         | Actualiza `precio_venta`, `costo_compra` y, si viene, `stock_minimo` de productos existentes. No crea productos ni cambia el precio congelado de una línea de pedido ya registrada (salvo las que siguen en 0, con `--completar-pedidos`). | `--archivo` (obligatorio), `--hoja`, `--completar-pedidos`, `--dry-run` |
+| `reporte_indicadores`    | EI, NS y COI de un periodo, con el COI desglosado (CA por concepto, PD con líneas, unidades y productos). Guarda una foto exacta de los valores en JSON o la compara con una anterior y falla si algo cambió. No escribe en la base. | `--desde`, `--hasta` (obligatorios, AAAA-MM-DD), `--origen` (`real`), `--detalle` (cada línea del PD), `--guardar ruta.json`, `--comparar ruta.json` |
 | `clasificar_productos`   | Clasifica productos por categoría según palabras clave en el nombre.                                                | `--codigo`, `--categoria` (ambos opcionales; sin ellos reclasifica todos)     |
 | `configurar_lead_time`   | Asigna lead time (días) a productos.                                                                                 | `--dias` (obligatorio), `--codigo` (opcional; sin él, solo los que están en 0) |
 | `crear_grupos_permisos`  | Crea/actualiza los grupos "administrador" (acceso total) y "operador" (pedidos, movimientos y conteos, sin borrar). | —                                                                              |
@@ -257,8 +261,13 @@ almacenamiento y PD pérdidas por desabastecimiento.
 - **NS** — `Pedido` / `PedidoDetalle.atendido_a_tiempo`.
 - **COI** — suma de `CostoAlmacenamiento.monto` en el periodo (costos de
   almacenamiento) más, por cada `PedidoDetalle` no atendido por completo,
-  `(cantidad no atendida) × (precio_venta − costo_compra)` del producto
-  (pérdidas por desabastecimiento).
+  `(cantidad no atendida) × (precio_venta_unitario − costo_compra_unitario)`
+  (pérdidas por desabastecimiento). Son el precio y el costo **congelados
+  en la línea** al registrarla, no los actuales del `Producto`: así el COI
+  de un periodo ya medido no cambia al actualizar precios. La pérdida es
+  la utilidad no percibida, no el precio de venta: si la venta se hubiera
+  hecho, también se habría incurrido en el costo de compra (Silver, Pyke &
+  Peterson; Chopra & Meindl).
 
   **Las mermas ya están dentro de esa suma**: `cargar_datos` (hoja
   `3_COI_CA`) carga el monto agregado de "Mermas del periodo" como una fila
@@ -273,6 +282,180 @@ almacenamiento y PD pérdidas por desabastecimiento.
   de instrumentar `Merma` en el cálculo, hay que dejar de cargar "Mermas del
   periodo" como fila de `CostoAlmacenamiento` (o restarla al construir el
   monto de almacenamiento), no simplemente sumar las dos fuentes.
+
+### Cuadre del COI del pretest (agosto 2026)
+
+Fórmula vigente (`calcular_coi()`, `inventario/servicios/indicadores.py`):
+
+```
+COI = CA + PD
+CA  = Σ CostoAlmacenamiento.monto con periodo_mes en el rango
+PD  = Σ (cantidad_solicitada − cantidad_atendida)
+        × (precio_venta_unitario − costo_compra_unitario)
+      sobre los PedidoDetalle del rango con cantidad_atendida < cantidad_solicitada
+```
+
+`reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 --detalle` da,
+con origen real:
+
+| | Valor |
+|---|---|
+| CA (4 conceptos, mes 08/2026) | S/ 1 050,00 |
+| PD (91 líneas, 602 unidades, 79 productos) | S/ 4 371,40 |
+| **COI** | **S/ 5 421,40** |
+
+- **Las 91 líneas cuadran una por una con la hoja `3_COI_PD`** de
+  `datos/fichas_pretest_agosto_2026.xlsx` (mismo pedido, código, cantidad
+  no atendida, precio y costo). Las 91 tienen `precios_reconstruidos=True`
+  (migración 0021), pero sus valores coinciden con los de la ficha; 43 ya
+  difieren del precio actual del catálogo, y el COI no cambió.
+- **La ficha en el repositorio también da 5 421,40**: `3_COI_PD!I96 =
+  SUM(I5:I95) = 4 371,40` y `3_COI_resumen!B7 = 1 050 + 4 371,40`,
+  también al recalcularla con LibreOffice. Las otras dos copias del mismo
+  archivo son idénticas (mismo MD5).
+- **El valor 9 792,80 no sale de ninguna ficha guardada**, y su PD
+  implícito (8 742,80) es exactamente 2 × 4 371,40. No viene de usar el
+  precio de venta completo: con el precio completo, el PD sería S/ 17 143,20
+  (y S/ 18 134,40 con los precios actuales). Además, ningún producto
+  cumple `precio = 2 × costo` (0 de 275, precio/costo medio 1,3013). El
+  doble exacto es lo que da sumar la columna "Pérdida (S/)" **incluida su
+  propia fila TOTAL** (p. ej. `SUM(I5:I96)` o `SUM(I:I)`). **Corrección:**
+  donde figure 9 792,80, el PD debe ser `SUM(I5:I95)` (sin la fila de
+  total) = 4 371,40, y el COI 5 421,40.
+- **Ventana del CA.** La hoja `3_COI_CA` declara 25/07/2026–24/08/2026 (la
+  misma que `1_EI`), mientras que `2_NS` y el PD cubren
+  01/08/2026–31/08/2026. `CostoAlmacenamiento` guarda solo el mes
+  (`periodo_mes`), así que el sistema asigna los S/ 1 050,00 completos a
+  agosto y suma CA y PD de ventanas desplazadas 7 días. El impacto exacto
+  en soles no se puede determinar con la ficha, porque no trae costos por
+  día. Alquiler (550) y personal (300) son cuotas mensuales y ambas
+  ventanas tienen 31 días: impacto 0. Energía (50) y mermas (150) dependen
+  de cuándo ocurrieron: hasta S/ 200,00 podrían corresponder a otra ventana
+  (S/ 45,16 si se prorratean por días, 7/31 de 200). `cargar_datos` avisa
+  ahora cuando la ventana declarada del CA no coincide con la de los
+  pedidos; no cambia ningún monto.
+
+## Importar el postest
+
+### Cómo queda separado del pretest
+
+- **Basta con el rango de fechas; no hace falta otro valor de `origen`.**
+  El postest es dato real, así que va con `--origen real`. `prueba` sigue
+  siendo solo para datos de desarrollo. Los tres indicadores se calculan
+  para cualquier rango (`calcular_ei/ns/coi(desde, hasta, origen)`, el
+  dashboard y reportes con `fecha_inicio`/`fecha_fin`, y
+  `reporte_indicadores`), así que agosto y el mes del postest se miden por
+  separado sin tocarse.
+- **El periodo de cada registro sale de sus propias fechas:** EI por
+  `ConteoFisico.fecha_corte`, NS y PD por `Pedido.fecha_solicitud`, y CA
+  por `periodo_mes` (el mes de la fecha de corte de `1_EI`). No hay un
+  parámetro de periodo, y no hace falta.
+- **Por qué el pretest queda congelado:**
+  1. El PD usa el precio y el costo congelados en cada `PedidoDetalle`
+     (`save()` impide cambiarlos), nunca el precio actual del producto.
+     Actualizar precios para el postest no cambia agosto.
+  2. `cargar_datos` congela en cada línea no atendida el precio y el costo
+     **de su fila en `3_COI_PD`** (los del periodo de la ficha). Antes
+     congelaba el precio que tenía el catálogo al importar y después lo
+     actualizaba, de modo que un postest con precios distintos habría
+     quedado valorizado a precios del pretest.
+  3. `cargar_datos` rechaza (sin escribir nada) un archivo con datos de un
+     mes que ya tiene datos del mismo origen. Por ejemplo, un pedido del
+     postest fechado en agosto. También rechaza un `--limpiar` que
+     borraría un mes que el archivo no vuelve a cargar: `--limpiar --origen
+     real` con el postest borraría el pretest.
+  4. Prueba `CongelamientoPretestTests`
+     (`inventario/tests/test_congelamiento_pretest.py`): carga un pretest de
+     agosto, un postest de setiembre con otros precios, un movimiento
+     operativo, `cargar_precios --completar-pedidos` y un cambio de precio a
+     mano, y comprueba que EI, NS y COI de agosto son idénticos. Si se
+     calculara el PD con el precio actual del producto, la prueba falla
+     (agosto pasaría de 1 217,00 a 3 727,10).
+- **Una sola fuente por periodo.** Las pantallas de pedidos, movimientos y
+  conteos registran con `origen=real`. Si durante el postest se registran
+  pedidos o conteos en el sistema **y además** se importa la ficha del
+  mismo mes, se contarían dos veces. `cargar_datos` lo rechaza (el mes ya
+  tiene datos). Hay que decidir antes de empezar cuál es la fuente del
+  postest: las fichas (como en el pretest, recomendado para que el
+  instrumento sea el mismo) o el registro en el sistema.
+- **Un mes calendario por periodo.** El NS y el PD se miden por fecha de
+  pedido. El CA, por mes. Para que CA y PD midan lo mismo, la ventana del
+  CA debe ser la de los pedidos (p. ej. 01/09–30/09), no 26/08–25/09 como
+  en la ficha de ejemplo del postest. La fecha de corte del conteo debe
+  caer en ese mismo mes.
+
+### Qué pedirle a la empresa
+
+| Indicador | Dato | Formato (hoja de la ficha) |
+|---|---|---|
+| EI | Conteo físico al cierre del periodo: código, producto, stock según kardex y según conteo físico, con fecha de corte y responsable | `1_EI`: N.°, Fecha de corte, Código, Producto y presentación, Stock según kardex, Stock según conteo físico |
+| NS | Todos los pedidos del periodo, atendidos o no: fecha del pedido, cliente (código), código del producto, cantidad solicitada, cantidad atendida, fecha requerida, fecha de atención y motivo si no se atendió completo | `2_NS`: N.°, Fecha del pedido, Cliente (código), Código del producto, Producto y presentación, Cant. solicitada, Cant. atendida, Fecha requerida, Fecha de atención, Motivo, ¿A tiempo? (1/0) |
+| COI (CA) | Costos de almacenamiento del periodo por concepto: alquiler imputado, energía imputada, personal de almacén y mermas valorizadas a costo, con la misma ventana que los pedidos | `3_COI_CA`: Componente, Detalle del cálculo, Periodo (`dd/mm/aaaa–dd/mm/aaaa`), Monto (S/) |
+| COI (PD) | Por cada pedido no atendido por completo: precio de venta y costo de compra **vigentes en el periodo** | `3_COI_PD`: N.°, N.° de pedido en Ficha 2, Código del producto, Producto y presentación, Cant. no atendida, Precio de venta (S/), Costo de compra (S/) |
+| COI (catálogo) | Precios y costos vigentes de todo el catálogo al cierre del periodo (opcional; no afecta el COI de ningún periodo ya cargado) | Hoja con Código, Precio de venta, Costo de compra y, opcional, Stock mínimo |
+
+Notas:
+
+- El responsable del conteo no está en `1_EI`. `cargar_datos` registra
+  "Importación automática"; anotar el responsable real en el acta (o en
+  `ConteoFisico.responsable` desde el admin).
+- "¿A tiempo?" debe tener su valor calculado (abrir y guardar el archivo en
+  Excel o LibreOffice). Si llega vacío, `cargar_datos` lo calcula con la
+  fecha requerida y la de atención, con el mismo criterio de la ficha, y
+  avisa. Si contradice esas fechas, también avisa y se queda con el valor
+  de la ficha.
+
+Comandos y orden: `cargar_datos` (las cuatro hojas de una vez; congela el
+precio de las líneas no atendidas desde `3_COI_PD` y deja esos precios en
+el catálogo). Después, opcional, `cargar_precios` con la lista de precios
+del periodo. El orden entre los dos no cambia el COI de ningún periodo. No
+usar `--completar-pedidos` salvo que el reporte avise de líneas no
+atendidas con precio 0.
+
+### Checklist de importación
+
+```bash
+# 0. Respaldo completo antes de tocar nada (es la forma de revertir).
+pg_dump -U diego -Fc inventario_ia > respaldo_antes_postest_$(date +%Y%m%d_%H%M).dump
+
+# 1. Foto exacta del pretest (debe dar EI 56.32%, NS 58.08%, COI S/ 5421.40).
+python manage.py reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 \
+    --guardar artefactos/indicadores/pretest_agosto.json
+
+# 2. Ensayo sin escribir: revisar advertencias, periodo y desglose del COI
+#    contra la hoja 3_COI_resumen de la ficha. Si sale un error de
+#    "ya hay datos de origen real en MM/AAAA", corregir las fechas del archivo.
+python manage.py cargar_datos --archivo datos/fichas_postest.xlsx --origen real --dry-run
+
+# 3. Carga real (SIN --limpiar).
+python manage.py cargar_datos --archivo datos/fichas_postest.xlsx --origen real
+
+# 4. Opcional: precios vigentes del catálogo.
+python manage.py cargar_precios --archivo datos/precios_postest.xlsx --dry-run
+python manage.py cargar_precios --archivo datos/precios_postest.xlsx
+
+# 5. El pretest no cambió ni un decimal (falla si algo cambió).
+python manage.py reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 \
+    --comparar artefactos/indicadores/pretest_agosto.json
+
+# 6. Indicadores del postest, para cuadrarlos contra su ficha línea por línea.
+python manage.py reporte_indicadores --desde 2026-09-01 --hasta 2026-09-30 --detalle \
+    --guardar artefactos/indicadores/postest_setiembre.json
+```
+
+Si el paso 5 falla, o los valores del paso 6 no cuadran con la ficha y la
+causa es la carga (no la ficha), revertir al respaldo del paso 0 y no
+seguir:
+
+```bash
+pg_restore -U diego -d inventario_ia --clean --if-exists respaldo_antes_postest_AAAAMMDD_HHMM.dump
+python manage.py reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 \
+    --comparar artefactos/indicadores/pretest_agosto.json
+```
+
+No usar `cargar_datos --limpiar` para deshacer el postest: borra todo el
+origen real (el comando ya lo rechaza si eso incluye agosto). Si la carga
+falla a mitad, la transacción se revierte sola y no hace falta restaurar.
 
 ## Optimización del modelo de predicción
 

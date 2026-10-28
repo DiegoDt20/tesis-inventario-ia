@@ -36,7 +36,22 @@ indicadores.
   marcan así las líneas que quedaron en 0 (pedido importado antes de
   conocer el precio del producto) y se completan con
   `cargar_precios --completar-pedidos`, así que el orden de carga
-  (precios antes o después de pedidos) no cambia el COI.
+  (precios antes o después de pedidos) no cambia el COI. `cargar_datos`
+  congela en cada línea no atendida el precio y el costo de su fila en
+  `3_COI_PD` (no el del catálogo al importar). PD = utilidad no percibida
+  (margen), nunca el precio completo. `calcular_coi()` devuelve además el
+  desglose (`conceptos_almacenamiento`, `lineas_desabastecimiento`,
+  `unidades_no_atendidas`, `productos_afectados`,
+  `lineas_precio_reconstruido`), que muestran reportes, el dashboard y
+  `reporte_indicadores`.
+  Cuadre del pretest (28/10/2026): CA 1 050,00 + PD 4 371,40 (91 líneas,
+  602 u., 79 productos) = **5 421,40**; las 91 líneas coinciden una por
+  una con `datos/fichas_pretest_agosto_2026.xlsx`, que también da
+  5 421,40. Un COI de 9 792,80 es el PD sumado con su propia fila TOTAL
+  (2 × 4 371,40): se corrige la ficha/documento, no el sistema. El CA de
+  la ficha declara 25/07–24/08 y el PD 01/08–31/08; `CostoAlmacenamiento`
+  solo guarda el mes, `cargar_datos` lo advierte y no cambia montos.
+  Detalle en "Cuadre del COI del pretest" del README.
   `calcular_coi()` (`inventario/servicios/indicadores.py`) **no** lee el
   modelo `Merma` directamente. Las mermas ya entran al COI por otra vía: `cargar_datos` (hoja `3_COI_CA`) carga el monto agregado
   "Mermas del periodo" como una fila más de `CostoAlmacenamiento`, porque
@@ -140,6 +155,17 @@ indicadores.
   importa las fichas de registro (Excel con hojas `1_EI`, `2_NS`, `3_COI_CA`,
   `3_COI_PD`) y calcula los tres indicadores desde la base de datos para
   verificar que la importación no deformó los datos.
+- Pretest congelado: `cargar_datos` rechaza (sin escribir nada) datos de
+  un mes que ya tiene datos del mismo origen y un `--limpiar` que borraría
+  meses que el archivo no vuelve a cargar; reporta los indicadores solo
+  del periodo cargado; guarda `PedidoDetalle.fecha_requerida` y calcula
+  "¿A tiempo?" con las fechas si la celda llega vacía. El postest va con
+  `--origen real` y se separa por fechas (no hace falta otro origen). Test
+  `CongelamientoPretestTests`; procedimiento en "Importar el postest" del
+  README.
+- Comando `reporte_indicadores --desde --hasta [--origen] [--detalle]
+  [--guardar f.json] [--comparar f.json]`: EI/NS/COI de un periodo con el
+  COI desglosado; `--comparar` falla si algún valor cambió. No escribe.
 - Comando `cargar_precios --archivo precios.xlsx [--hoja nombre]
   [--completar-pedidos] [--dry-run]`
   (`inventario/management/commands/cargar_precios.py`): actualiza

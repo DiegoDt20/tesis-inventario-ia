@@ -128,6 +128,23 @@ class CalcularCOITests(TestCase):
         self.assertEqual(resultado['almacenamiento'], Decimal('500.00'))
         self.assertEqual(resultado['desabastecimiento'], Decimal('120.00'))
         self.assertEqual(resultado['valor'], Decimal('620.00'))
+        # Desglose para cuadrar contra la ficha.
+        self.assertEqual(resultado['lineas_desabastecimiento'], 1)
+        self.assertEqual(resultado['unidades_no_atendidas'], 6)
+        self.assertEqual(resultado['productos_afectados'], 1)
+        self.assertEqual([c['monto'] for c in resultado['conceptos_almacenamiento']], [Decimal('500.00')])
+
+    def test_pd_es_utilidad_no_percibida_no_precio_de_venta(self):
+        # 6 u. × margen 20.00 = 120.00; con el precio completo serían 300.00.
+        pedido = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(datetime(2026, 1, 10)),
+            cliente='C-001', canal=Pedido.Canal.MOSTRADOR,
+        )
+        PedidoDetalle.objects.create(
+            pedido=pedido, producto=self.producto,
+            cantidad_solicitada=10, cantidad_atendida=4, atendido_a_tiempo=False,
+        )
+        self.assertEqual(calcular_coi(date(2026, 1, 1), date(2026, 1, 31))['desabastecimiento'], Decimal('120.00'))
 
     def test_coi_sin_datos_da_cero_no_none(self):
         resultado = calcular_coi(date(2026, 1, 1), date(2026, 1, 31))
