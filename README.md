@@ -1346,6 +1346,23 @@ por línea base y configuración):
 - Lote de recomendaciones con el #7: ningún producto cambió de estado
   respecto del lote del #6 (19/30/185/26). La cantidad sugerida de látex
   baja de 771,0 a 730,5 unidades.
+- **División única** (`evaluar_predicciones --no-walk-forward`, guardada en
+  el #7 como en el #6): exactitud diaria 48,6 % (#6: 54,0 %); por
+  categoría accesorio 5,8 %, esmalte 33,6 %, látex 68,1 %. La mejor línea
+  base sigue siendo la media móvil (50,9 %; con el #6, 56,4 %): el modelo
+  no la supera.
+- **Día omitido en la prueba (corregido).** Con la clasificación nueva,
+  esmalte no tiene pedidos el 31/08. `evaluar_predicciones
+  --no-walk-forward` y `entrenar_ajustado` lo dejaban fuera de la prueba
+  (20 filas en vez de 21), porque `construir_features` solo rellena entre
+  el primer y el último pedido de cada serie. Ahora ambos extienden cada
+  categoría hasta el último día del histórico (`densificar_periodo`, como
+  el walk-forward). Sin el arreglo, la división única daba 55,5 % (esmalte
+  51,2 %); las cifras de arriba son las corregidas. El walk-forward y la
+  ablación ya incluían ese día. Las métricas de prueba que `entrenar_ajustado`
+  guardó al registrar el #7 (MAE 12,20, R² 0,404 de la comparación de tres
+  modelos) son de 20 filas; los pesos del modelo no cambian, porque el
+  entrenamiento (01–24/08) no incluye ese día.
 
 ## Pantalla del modelo (`/modelo/`)
 

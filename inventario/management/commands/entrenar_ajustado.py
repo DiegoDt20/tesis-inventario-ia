@@ -28,6 +28,7 @@ from inventario.ml.entrenamiento import (
     guardar_modelo,
 )
 from inventario.ml.escalado import EscaladoNivel, configuracion_guardada, niveles_externos
+from inventario.ml.features import densificar_periodo
 from inventario.ml.evaluacion import comparar_modelos
 from inventario.models import ModeloEntrenado, NivelPrediccion, Origen
 
@@ -229,7 +230,11 @@ class Command(BaseCommand):
                 self.stdout.write(f'    {categoria:<12}{dias_por_categoria[categoria]} días con venta')
         self.stdout.write('')
 
-        return df_categorias[df_categorias['serie_id'].isin(aptas)].reset_index(drop=True)
+        # Cada categoría hasta el último día del histórico, con cero los días
+        # sin pedidos: si no, una categoría sin pedidos el último día pierde
+        # ese día del test (construir_features solo rellena entre el primer y
+        # el último pedido de cada serie).
+        return densificar_periodo(df_categorias[df_categorias['serie_id'].isin(aptas)].reset_index(drop=True))
 
     def _imprimir_comparacion(self, comparacion):
         self.stdout.write('\nComparación de los tres modelos sobre el mismo test interno:')

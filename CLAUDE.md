@@ -312,7 +312,12 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     solo los días ≤ origen (tests `EscaladoSinFugaTests`) o, en
     `entrenar_ajustado`, solo los de entrenamiento. Vigente **#7** desde
     el 29/10/2026 (mismo comando que el #6 sobre la clasificación
-    corregida; ventana 83.5% de exactitud, diario 46.1%; #6 inactivo). Las
+    corregida; ventana 83.5% de exactitud, diario 46.1%; división única
+    diaria 48.6%, guardada en el #7; #6 inactivo). `entrenar_ajustado` y
+    `evaluar_predicciones --no-walk-forward` densifican cada categoría
+    hasta el último día del histórico (antes omitían un último día sin
+    pedidos; las métricas de prueba que guardó el #7 al entrenarse son de
+    20 filas, no 21). Las
     cifras siguientes son del #6 (clasificación anterior): #6
     (`entrenar_ajustado --origen real --nivel categoria --dias-test 7`;
     accesorio ×5.829; #5 inactivo). Ventana: WAPE total 20.6% → 16.4%

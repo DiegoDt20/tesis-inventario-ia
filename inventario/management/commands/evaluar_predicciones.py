@@ -38,7 +38,7 @@ from inventario.ml.carga_interna import (
 from inventario.ml.entrenamiento import HIPERPARAMETROS_AJUSTE
 from inventario.ml.escalado import EscaladoNivel, escalar
 from inventario.ml.evaluacion import LINEAS_BASE, calcular_metricas, comparar_exactitud, predecir_con_modelo
-from inventario.ml.features import construir_features, dividir_temporal
+from inventario.ml.features import construir_features, densificar_periodo, dividir_temporal
 from inventario.ml.walk_forward import (
     HORIZONTE_DIARIO,
     MIN_ORIGENES_CONFIABLE,
@@ -324,7 +324,11 @@ class Command(BaseCommand):
         antes) y, para la ventana, un único origen (el último día de
         entrenamiento) pronosticado de forma encadenada con el archivo del
         vigente."""
-        modelo, df = contexto['modelo'], contexto['df']
+        modelo = contexto['modelo']
+        # Cada categoría hasta el último día del histórico, con cero los días
+        # sin pedidos (como el walk-forward): una categoría sin pedidos el
+        # último día no puede perder ese día de la prueba.
+        df = densificar_periodo(contexto['df'])
         dias_test = modelo.dias_prueba
         n_dias = (df['fecha'].max() - df['fecha'].min()).days + 1
         dias_entrenamiento = n_dias - dias_test

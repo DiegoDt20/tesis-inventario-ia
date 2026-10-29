@@ -163,6 +163,12 @@ class ComandosConEscaladoTests(TestCase):
         self.assertEqual(modelo.escalado['factores']['latex'], 1.0)
         self.assertIn('Series escaladas: accesorio', salida)
 
+    def test_categoria_sin_pedidos_el_ultimo_dia_no_pierde_ese_dia_del_test(self):
+        ultimo = self.interno['fecha'].max()
+        self.interno = self.interno[~((self.interno['serie_id'] == 'esmalte') & (self.interno['fecha'] == ultimo))]
+        salida, _ = self._entrenar()
+        self.assertIn('Filas de test: 21', salida)
+
     def test_no_escalar_nivel_reproduce_el_procedimiento_anterior(self):
         _, modelo = self._entrenar('--no-escalar-nivel')
         self.assertIsNone(modelo.escalado)

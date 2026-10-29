@@ -293,6 +293,15 @@ class ComandoEvaluarPrediccionesTests(TestCase):
         self.assertIn('R² global', salida)
         self.assertIn('Media móvil 7 días', salida)
 
+    def test_division_unica_no_pierde_el_ultimo_dia_de_una_categoria_sin_pedidos(self):
+        # esmalte sin pedidos el 31/08: ese día entra a la prueba con cero.
+        interno = self.interno[~((self.interno['serie_id'] == 'esmalte') & (self.interno['fecha'] == '2026-08-31'))]
+        _salida, dir_reportes = self._correr('--no-walk-forward', '--horizonte', 'diario', interno=interno)
+        diario = json.loads(next(dir_reportes.glob('evaluacion_division_unica_*.json')).read_text())['horizontes']['diario']
+        self.assertEqual(len(diario['pronosticos_diarios']), 21)
+        ultimo = [f for f in diario['pronosticos_diarios'] if f['categoria'] == 'esmalte' and f['fecha'] == '2026-08-31']
+        self.assertEqual([f['real'] for f in ultimo], [0.0])
+
     def test_historico_insuficiente_falla_con_mensaje_claro(self):
         # 18 días: alcanza para el horizonte diario (4 orígenes) pero no
         # para una ventana de 7 (harían falta 14 + 7 = 21).
