@@ -316,8 +316,10 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     diaria 48.6%, guardada en el #7; #6 inactivo). `entrenar_ajustado` y
     `evaluar_predicciones --no-walk-forward` densifican cada categoría
     hasta el último día del histórico (antes omitían un último día sin
-    pedidos; las métricas de prueba que guardó el #7 al entrenarse son de
-    20 filas, no 21). Las
+    pedidos). Las métricas de prueba del #7 se recalcularon en su registro
+    con 21 filas (MAE 13.42, R² 0.283; antes 12.20 y 0.404 con 20); el
+    motivo y los valores anteriores quedan en `ModeloEntrenado.notas`
+    (migración 0030). Las
     cifras siguientes son del #6 (clasificación anterior): #6
     (`entrenar_ajustado --origen real --nivel categoria --dias-test 7`;
     accesorio ×5.829; #5 inactivo). Ventana: WAPE total 20.6% → 16.4%

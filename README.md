@@ -1359,10 +1359,18 @@ por línea base y configuración):
   categoría hasta el último día del histórico (`densificar_periodo`, como
   el walk-forward). Sin el arreglo, la división única daba 55,5 % (esmalte
   51,2 %); las cifras de arriba son las corregidas. El walk-forward y la
-  ablación ya incluían ese día. Las métricas de prueba que `entrenar_ajustado`
-  guardó al registrar el #7 (MAE 12,20, R² 0,404 de la comparación de tres
-  modelos) son de 20 filas; los pesos del modelo no cambian, porque el
-  entrenamiento (01–24/08) no incluye ese día.
+  ablación ya incluían ese día. Las métricas de prueba que
+  `entrenar_ajustado` guardó al registrar el #7 se recalcularon en el mismo
+  registro con las 21 filas (`ModeloEntrenado.notas` guarda el motivo y los
+  valores anteriores), sin crear otro modelo: los pesos no cambian, porque
+  el entrenamiento (01–24/08) no incluye ese día. Un reentrenamiento en
+  memoria da los mismos 350 árboles.
+
+  | Prueba de `entrenar_ajustado` (25–31/08) | MAE (20 filas) | MAE (21) | R² (20) | R² (21) |
+  |---|---|---|---|---|
+  | Línea base ingenua | 15,05 | 15,29 | 0,071 | 0,103 |
+  | Solo datos internos | 11,68 | 13,05 | 0,425 | 0,277 |
+  | Preentrenado + ajuste (#7) | 12,20 | 13,42 | 0,404 | 0,283 |
 
 ## Pantalla del modelo (`/modelo/`)
 

@@ -103,6 +103,10 @@ class ModeloEntrenado(models.Model):
     conjunto_medicion = models.CharField(max_length=10, choices=ConjuntoMedicion.choices, blank=True)
     ruta_archivo = models.CharField(max_length=500)
     activo = models.BooleanField(default=True)
+    # Correcciones hechas al registro después de crearlo (qué se cambió,
+    # cuándo, por qué y los valores anteriores), para que las métricas
+    # guardadas sean trazables.
+    notas = models.TextField(blank=True)
 
     class Meta:
         verbose_name = 'Modelo entrenado'
