@@ -64,3 +64,50 @@ class ParticipacionYDesagregacionTests(TestCase):
 
         self.assertEqual(len(reparto), 3)
         self.assertTrue(all(valor == 0.0 for _, valor, _ in reparto))
+
+
+class PronosticoDesdeFinDelHistoricoTests(TestCase):
+    """predecir_demanda (nivel categoría) pronostica desde el día siguiente
+    al último del histórico aunque una categoría no tenga pedidos ese día."""
+
+    def test_todas_las_categorias_empiezan_al_dia_siguiente_del_corte(self):
+        from datetime import date, timedelta
+        from io import StringIO
+        from unittest import mock
+
+        import numpy as np
+        import pandas as pd
+        from django.core.management import call_command
+
+        from inventario.management.commands import predecir_demanda
+        from inventario.models import ModeloEntrenado, Prediccion, Producto
+
+        for categoria in ('esmalte', 'latex'):
+            Producto.objects.create(
+                codigo=f'P-{categoria}', nombre=categoria, categoria=categoria,
+                precio_venta='10.00', costo_compra='5.00',
+            )
+        # esmalte vende hasta el 30/08 y látex hasta el 31/08.
+        filas = [
+            {'fecha': pd.Timestamp(date(2026, 8, 1) + timedelta(days=i)), 'serie_id': categoria, 'cantidad': 3.0}
+            for categoria, dias in (('esmalte', 30), ('latex', 31)) for i in range(dias)
+        ]
+        ModeloEntrenado.objects.create(
+            fase=ModeloEntrenado.Fase.AJUSTADO, nivel='categoria', hiperparametros={},
+            mae=1, rmse=1, smape=0.1, r2=0.4, ruta_archivo='no-se-usa.json', activo=True,
+        )
+        modelo = mock.Mock()
+        modelo.predict.side_effect = lambda x: np.ones(len(x))
+        participacion = pd.DataFrame(
+            [{'producto_id': p.pk, 'categoria': p.categoria, 'participacion': 1.0} for p in Producto.objects.all()]
+        )
+        with mock.patch.object(predecir_demanda, 'leer_demanda_interna_por_categoria', return_value=pd.DataFrame(filas)), \
+                mock.patch.object(predecir_demanda, 'calcular_participacion', return_value=participacion), \
+                mock.patch.object(predecir_demanda.xgb, 'XGBRegressor', return_value=modelo):
+            call_command('predecir_demanda', dias=3, stdout=StringIO())
+
+        primeras = {
+            p.producto.categoria: p.fecha_objetivo
+            for p in Prediccion.objects.select_related('producto').order_by('-fecha_objetivo')
+        }
+        self.assertEqual(primeras, {'esmalte': date(2026, 9, 1), 'latex': date(2026, 9, 1)})

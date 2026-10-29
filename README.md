@@ -193,7 +193,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 
 | Comando                 | Qué hace                                                                                                          | Parámetros                                                                 |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos. Cada línea no atendida congela el precio y el costo de su fila en `3_COI_PD`. Rechaza datos de un mes ya cargado del mismo origen y un `--limpiar` que borraría otro periodo. Reporta los indicadores solo del periodo cargado, con el COI desglosado. | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar` (borra todo el origen; solo para recargar el mismo periodo), `--reemplazar-mes AAAA-MM` (sustituye solo ese mes del origen por una ficha corregida; ver [Pretest corregido](#pretest-corregido-29102026)), `--dry-run` |
+| `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos. Cada línea no atendida congela el precio y el costo de su fila en `3_COI_PD`. Rechaza datos de un mes ya cargado del mismo origen y un `--limpiar` que borraría otro periodo. Reporta los indicadores solo del periodo cargado, con el COI desglosado. | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar` (borra todo el origen; solo para recargar el mismo periodo), `--reemplazar-mes AAAA-MM` (sustituye solo ese mes del origen por una ficha corregida; ver [Pretest corregido](#pretest-corregido-29102026)), `--responsable` (del conteo físico; por defecto "Importación automática"), `--dry-run` |
 | `cargar_precios`         | Actualiza `precio_venta`, `costo_compra` y, si viene, `stock_minimo` de productos existentes. No crea productos ni cambia el precio congelado de una línea de pedido ya registrada (salvo las que siguen en 0, con `--completar-pedidos`). | `--archivo` (obligatorio), `--hoja`, `--completar-pedidos`, `--dry-run` |
 | `reporte_indicadores`    | EI, NS y COI de un periodo, con el COI desglosado (CA por concepto, PD con líneas, unidades y productos). Guarda una foto exacta de los valores en JSON o la compara con una anterior y falla si algo cambió. No escribe en la base. | `--desde`, `--hasta` (obligatorios, AAAA-MM-DD), `--origen` (`real`), `--detalle` (cada línea del PD), `--guardar ruta.json`, `--comparar ruta.json` |
 | `clasificar_productos`   | Clasifica productos por categoría según palabras clave en el nombre.                                                | `--codigo`, `--categoria` (ambos opcionales; sin ellos reclasifica todos)     |
@@ -318,16 +318,34 @@ La empresa entregó una versión corregida de la ficha del pretest
   productos de `1_EI` con el nombre y la presentación de la ficha (302
   cambios en 194 productos; tabla en
   `artefactos/correcciones/cambios_catalogo_20261029.md`) y dejó inactivos
-  los 15 que no están en la ficha. Pendientes que reporta el comando y no
-  se cambiaron: 6 productos con una categoría que no coincide con el nombre
-  de la ficha (p. ej. PIN-174 "Lija Grano 180 pliego" en látex) y 71
+  los 15 que no están en la ficha. Queda reportado y sin cambiar: 71
   descripciones que la ficha repite en 2 o 3 códigos (154 códigos), cada
   uno con su propio conteo.
-- **El modelo no cambia:** la demanda por categoría es la misma (los
-  pedidos del Anypsa siguen en esmalte, ahora en PIN-219, y los de la Lija
-  en accesorio, ahora en PIN-260), así que el #6 y sus evaluaciones siguen
-  valiendo. Lote de recomendaciones regenerado: ningún producto cambió de
-  estado; salen las 15 de los inactivos.
+- **Categorías:** después se corrigieron las 6 cuya categoría no coincidía
+  con el nombre de la ficha, deduciéndola del nombre (`clasificar_producto`;
+  tabla en `artefactos/correcciones/cambios_categoria_20261029.md`):
+  PIN-017, 175 y 178 látex → esmalte; PIN-170 esmalte → látex; PIN-171
+  solvente → esmalte; PIN-174 látex → accesorio. No queda ningún producto
+  en desacuerdo.
+- **Efecto en el modelo:** la reasignación de códigos no cambia la demanda
+  diaria por categoría (verificado día por día), pero la corrección de
+  categorías sí. Mueve 29 u. de PIN-170 (16, 29 y 31/08) de esmalte a látex
+  y 9 u. de PIN-171 (21/08) de solvente a esmalte. El #6 se ajustó y se
+  evaluó con la clasificación anterior, así que sus reportes de evaluación
+  (`evaluar_predicciones`, `evaluar_ablacion`) no se volvieron a correr y
+  corresponden a esa clasificación. Las predicciones se regeneraron con el
+  #6 sobre la clasificación nueva.
+- **`predecir_demanda`** extiende ahora cada categoría hasta el último día
+  del histórico con cero los días sin pedidos (`densificar_periodo`, como
+  el walk-forward). Antes, al quedar esmalte sin pedidos el 31/08 (el de
+  PIN-170 pasó a látex), su pronóstico arrancaba el 31/08 en vez del 01/09.
+- **Recomendaciones:** el lote regenerado no cambió el estado de ningún
+  producto (19 crítico, 30 reponer, 185 normal, 26 exceso). Salen las 15 de
+  los inactivos y PIN-171 pasa de punto de reorden a pronóstico.
+- **Responsable del conteo:** De la Cruz Torres, Diego Edwin; Olivera
+  Sanchez, Ricardo Brayan (investigadores), con validación del encargado de
+  la tienda. `cargar_datos --responsable` lo registra al cargar (la hoja
+  `1_EI` no lo trae).
 - **Postest:** la ficha del postest debe venir con los códigos corregidos
   (PIN-260 = Lija Grano 090 pliego; PIN-261 y AUTO-0261 ya no están
   activos). La ficha de ejemplo `datos/fichas_posttest_25-09-2026.xlsx`
@@ -454,9 +472,8 @@ con origen real:
 
 Notas:
 
-- El responsable del conteo no está en `1_EI`. `cargar_datos` registra
-  "Importación automática"; anotar el responsable real en el acta (o en
-  `ConteoFisico.responsable` desde el admin).
+- El responsable del conteo no está en `1_EI`: pasarlo con `cargar_datos
+  --responsable "..."` (sin la opción queda "Importación automática").
 - "¿A tiempo?" debe tener su valor calculado (abrir y guardar el archivo en
   Excel o LibreOffice). Si llega vacío, `cargar_datos` lo calcula con la
   fecha requerida y la de atención, con el mismo criterio de la ficha, y
@@ -483,10 +500,10 @@ python manage.py reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 \
 # 2. Ensayo sin escribir: revisar advertencias, periodo y desglose del COI
 #    contra la hoja 3_COI_resumen de la ficha. Si sale un error de
 #    "ya hay datos de origen real en MM/AAAA", corregir las fechas del archivo.
-python manage.py cargar_datos --archivo datos/fichas_postest.xlsx --origen real --dry-run
+python manage.py cargar_datos --archivo datos/fichas_postest.xlsx --origen real --responsable "..." --dry-run
 
 # 3. Carga real (SIN --limpiar).
-python manage.py cargar_datos --archivo datos/fichas_postest.xlsx --origen real
+python manage.py cargar_datos --archivo datos/fichas_postest.xlsx --origen real --responsable "..." 
 
 # 4. Opcional: precios vigentes del catálogo.
 python manage.py cargar_precios --archivo datos/precios_postest.xlsx --dry-run

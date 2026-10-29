@@ -179,8 +179,15 @@ indicadores.
   nombre/color/presentación de la ficha, precio y costo de `3_COI_PD`,
   categoría conservada por código; los 15 que no están en la ficha quedan
   `activo=False` (no se borran). La ficha repite 71 descripciones en 2–3
-  códigos, y 6 categorías no coinciden con el nombre (p. ej. PIN-174
-  "Lija Grano 180" en látex): reportados, sin cambiar.
+  códigos (reportado, sin cambiar). Las 6 categorías que no coincidían
+  con el nombre de la ficha se corrigieron deduciéndolas del nombre
+  (29/10/2026); eso movió 29 u. de esmalte a látex y 9 de solvente a
+  esmalte, así que el #6 y sus reportes de evaluación son de la
+  clasificación anterior (no se reentrenó ni se volvió a evaluar).
+  `predecir_demanda` (nivel categoría) extiende cada serie hasta el último
+  día del histórico (`densificar_periodo`). `cargar_datos --responsable`
+  registra el responsable del conteo (agosto: los investigadores, con
+  validación del encargado de la tienda).
   `comparar_fichas` (`inventario/servicios/correcciones_ficha.py`) arma la
   tabla de correcciones entre dos versiones de una ficha.
 - Comando `reporte_indicadores --desde --hasta [--origen] [--detalle]

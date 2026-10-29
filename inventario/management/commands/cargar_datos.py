@@ -32,6 +32,10 @@ SEPARADOR_PRODUCTO = '—'
 
 USUARIO_IMPORTACION = 'importador_datos'
 
+# Responsable del conteo cuando no se indica --responsable (la hoja 1_EI no
+# trae ese dato).
+RESPONSABLE_POR_DEFECTO = 'Importación automática'
+
 # Formatos de texto aceptados para fechas que llegaron como cadena en vez de
 # como celda de fecha nativa de Excel.
 FORMATOS_FECHA_TEXTO = ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%y')
@@ -117,6 +121,13 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            '--responsable', default=RESPONSABLE_POR_DEFECTO,
+            help=(
+                'Responsable del conteo físico de 1_EI (la ficha no lo trae). '
+                f'Por defecto "{RESPONSABLE_POR_DEFECTO}".'
+            ),
+        )
+        parser.add_argument(
             '--dry-run', action='store_true',
             help='Procesa y reporta el resultado sin escribir cambios en la base de datos.',
         )
@@ -186,6 +197,7 @@ class Command(BaseCommand):
             fecha_corte_ei = self._cargar_ei(
                 libro['1_EI'], origen, usuario, productos_por_codigo,
                 productos_por_descripcion, resumen,
+                responsable=options.get('responsable') or RESPONSABLE_POR_DEFECTO,
             )
             pedidos_por_numero = self._cargar_ns(
                 libro['2_NS'], origen, productos_por_codigo,
@@ -600,7 +612,7 @@ class Command(BaseCommand):
 
     def _cargar_ei(
         self, hoja, origen, usuario, productos_por_codigo,
-        productos_por_descripcion, resumen,
+        productos_por_descripcion, resumen, responsable=RESPONSABLE_POR_DEFECTO,
     ):
         nombre_hoja = '1_EI'
         fila_encabezado = self._encontrar_fila_encabezado(hoja, nombre_hoja)
@@ -663,7 +675,7 @@ class Command(BaseCommand):
             if conteo is None:
                 conteo = ConteoFisico.objects.create(
                     fecha_corte=fecha_corte,
-                    responsable='Importación automática',
+                    responsable=responsable,
                     origen=origen,
                 )
                 conteos_por_fecha[fecha_corte] = conteo

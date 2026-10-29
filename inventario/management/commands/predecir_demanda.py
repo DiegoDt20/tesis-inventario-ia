@@ -25,7 +25,7 @@ from inventario.ml.carga_interna import (
     seleccionar_categorias_aptas,
 )
 from inventario.ml.escalado import factor_guardado
-from inventario.ml.features import COLUMNAS_FEATURES, construir_features
+from inventario.ml.features import COLUMNAS_FEATURES, construir_features, densificar_periodo
 from inventario.ml.prediccion import calcular_participacion, desagregar_prediccion_categoria
 from inventario.models import ModeloEntrenado, NivelPrediccion, Prediccion, Producto
 
@@ -123,11 +123,16 @@ class Command(BaseCommand):
         participacion = calcular_participacion(origen=origen)
         productos_por_id = {p.pk: p for p in Producto.objects.all()}
         fecha_generacion = timezone.now()
+        # Cada categoría hasta el último día del histórico (de cualquier
+        # categoría), con cero los días sin pedidos, como en la validación
+        # walk-forward: si no, una categoría sin pedidos el último día
+        # empezaría a pronosticar desde ese día y no desde el siguiente.
+        historiales = densificar_periodo(df_categorias)
 
         creadas = 0
         with transaction.atomic():
             for categoria in aptas:
-                historial = df_categorias[df_categorias['serie_id'] == categoria]
+                historial = historiales[historiales['serie_id'] == categoria]
                 factor = factor_guardado(registro_modelo.escalado, categoria)
                 for fecha_objetivo, valor_categoria in self._predecir_serie(historial, modelo, dias, factor):
                     reparto = desagregar_prediccion_categoria(categoria, valor_categoria, participacion)

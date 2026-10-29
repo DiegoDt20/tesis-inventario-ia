@@ -168,6 +168,16 @@ class ReemplazarMesTests(_ConFichas):
         self.assertEqual(producto.stock_actual, 12)
 
 
+class ResponsableConteoTests(_ConFichas):
+    def test_por_defecto_importacion_automatica(self):
+        self._cargar_pretest()
+        self.assertEqual(ConteoFisico.objects.get(origen=Origen.REAL).responsable, 'Importación automática')
+
+    def test_se_puede_indicar(self):
+        self._cargar(_pretest_agosto(self.ruta('pretest.xlsx')), responsable='Investigadores')
+        self.assertEqual(ConteoFisico.objects.get(origen=Origen.REAL).responsable, 'Investigadores')
+
+
 class RecalcularStockPorOrigenTests(_ConFichas):
     def test_con_origen_ignora_los_movimientos_de_otro_origen(self):
         self._cargar_pretest()
