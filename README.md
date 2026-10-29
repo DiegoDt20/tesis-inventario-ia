@@ -193,7 +193,7 @@ Todos se ejecutan con `python manage.py <comando>`.
 
 | Comando                 | Qué hace                                                                                                          | Parámetros                                                                 |
 |--------------------------|---------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos. Cada línea no atendida congela el precio y el costo de su fila en `3_COI_PD`. Rechaza datos de un mes ya cargado del mismo origen y un `--limpiar` que borraría otro periodo. Reporta los indicadores solo del periodo cargado, con el COI desglosado. | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar` (borra todo el origen; solo para recargar el mismo periodo), `--dry-run` |
+| `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos. Cada línea no atendida congela el precio y el costo de su fila en `3_COI_PD`. Rechaza datos de un mes ya cargado del mismo origen y un `--limpiar` que borraría otro periodo. Reporta los indicadores solo del periodo cargado, con el COI desglosado. | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar` (borra todo el origen; solo para recargar el mismo periodo), `--reemplazar-mes AAAA-MM` (sustituye solo ese mes del origen por una ficha corregida; ver [Pretest corregido](#pretest-corregido-29102026)), `--dry-run` |
 | `cargar_precios`         | Actualiza `precio_venta`, `costo_compra` y, si viene, `stock_minimo` de productos existentes. No crea productos ni cambia el precio congelado de una línea de pedido ya registrada (salvo las que siguen en 0, con `--completar-pedidos`). | `--archivo` (obligatorio), `--hoja`, `--completar-pedidos`, `--dry-run` |
 | `reporte_indicadores`    | EI, NS y COI de un periodo, con el COI desglosado (CA por concepto, PD con líneas, unidades y productos). Guarda una foto exacta de los valores en JSON o la compara con una anterior y falla si algo cambió. No escribe en la base. | `--desde`, `--hasta` (obligatorios, AAAA-MM-DD), `--origen` (`real`), `--detalle` (cada línea del PD), `--guardar ruta.json`, `--comparar ruta.json` |
 | `clasificar_productos`   | Clasifica productos por categoría según palabras clave en el nombre.                                                | `--codigo`, `--categoria` (ambos opcionales; sin ellos reclasifica todos)     |
@@ -209,7 +209,9 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `evaluar_ablacion`       | Estudio de ablación de las fuentes de datos: base sin ajuste con datos de la empresa (con y sin escalado), solo datos internos y el procedimiento del vigente, con las tres líneas base, sobre la misma validación de origen móvil; comparación por origen con prueba de signos y lectura de las tres preguntas. **No toca datos ni activa ni registra modelos**; reporte en `artefactos/ablacion/`. Ver [Estudio de ablación](#estudio-de-ablación). | `--origen` (`real`) |
 | `generar_recomendaciones`| Genera una `Recomendacion` de reposición por producto activo con predicciones disponibles.                           | `--nivel-servicio` (0.95), `--dias-cobertura` (30)                            |
 | `indexar_conocimiento`   | Regenera el índice del asistente conversacional (borra y reconstruye `DocumentoIndexado`).                           | —                                                                              |
-| `recalcular_stock`       | Recalcula `stock_actual` de todos los productos a partir del historial de `Movimiento`.                              | —                                                                              |
+| `recalcular_stock`       | Recalcula `stock_actual` de todos los productos a partir del historial de `Movimiento`. Sin `--origen` mezcla orígenes: un ajuste de prueba posterior (el conteo de prueba del 10/09) pisa el stock real. | `--origen prueba\|real` |
+| `reconstruir_catalogo`   | Reconstruye el catálogo desde la ficha (`1_EI` = catálogo vigente): nombre, color y presentación de la ficha, precio y costo de `3_COI_PD`, categoría conservada por código (deducida si estaba en "otro"); los productos fuera de la ficha quedan inactivos, no se borran. Reporta categorías en conflicto con el nombre y descripciones repetidas. | `--archivo` (obligatorio), `--categoria CODIGO=CATEGORIA` (repetible), `--tabla ruta` (CSV y MD de cambios), `--dry-run` |
+| `comparar_fichas`        | Tabla de correcciones entre dos versiones de una ficha, celda por celda: correcciones de registro, ventana de medición y otras diferencias, con su motivo. No escribe en la base. | `--anterior`, `--corregida`, `--salida ruta` (obligatorios), `--motivo HOJA:N:texto` (repetible) |
 
 ## Modelos de datos
 
@@ -283,7 +285,63 @@ almacenamiento y PD pérdidas por desabastecimiento.
   periodo" como fila de `CostoAlmacenamiento` (o restarla al construir el
   monto de almacenamiento), no simplemente sumar las dos fuentes.
 
-### Cuadre del COI del pretest (agosto 2026)
+### Pretest corregido (29/10/2026)
+
+La empresa entregó una versión corregida de la ficha del pretest
+(`datos/PRETEST_TESIS_FINAL.xlsx`), que reemplaza a
+`datos/fichas_pretest_agosto_2026.xlsx`. Es la que está cargada:
+
+| | Primera ficha | Ficha corregida |
+|---|---|---|
+| EI | 56,32 % (147/261) | **56,15 % (146/260)** |
+| NS | 58,08 % (151/260) | **59,23 % (154/260)** |
+| COI | S/ 5 421,40 (CA 1 050 + PD 4 371,40, 91 líneas) | **S/ 5 341,40** (CA 1 050 + PD 4 291,40, 90 líneas, 592 u., 78 productos) |
+
+- **Qué corrige** (tabla completa, generada con `comparar_fichas`, en
+  `artefactos/correcciones/correcciones_pretest_20261029.md`): 8 registros
+  de `2_NS` (5 códigos reasignados, la cantidad atendida del 167 y las
+  fechas de atención de 167, 229 y 241), la fecha de corte del conteo
+  (24/08 → 31/08) y el periodo del CA (25/07–24/08 → 01/08–31/08). Además,
+  en `1_EI` sale la fila del Anypsa duplicado (PIN-260 era el mismo
+  producto que PIN-219, confirmado por la empresa) y la Lija Grano 090 pasa
+  a PIN-260 con 26 unidades contadas. El COI baja S/ 80,00: el pedido 167
+  sale del PD (10 u. × S/ 8,00).
+- **Cómo se cargó:** `cargar_datos --origen real --reemplazar-mes 2026-08`.
+  Borra solo agosto del origen real (pedidos, conteo, costos y los ajustes
+  de stock que hizo el importador), no borra productos ni toca otros meses,
+  exige que el archivo traiga solo ese mes y recalcula el stock con
+  movimientos del origen real. Las anomalías de las líneas del conteo
+  borrado se van con ellas; se volvió a correr `detectar_anomalias` y se
+  repuso la revisión de las 3 que estaban revisadas (mismos valores).
+- **Catálogo:** en la misma transacción, `reconstruir_catalogo
+  --categoria PIN-260=accesorio` dejó como catálogo vigente los 260
+  productos de `1_EI` con el nombre y la presentación de la ficha (302
+  cambios en 194 productos; tabla en
+  `artefactos/correcciones/cambios_catalogo_20261029.md`) y dejó inactivos
+  los 15 que no están en la ficha. Pendientes que reporta el comando y no
+  se cambiaron: 6 productos con una categoría que no coincide con el nombre
+  de la ficha (p. ej. PIN-174 "Lija Grano 180 pliego" en látex) y 71
+  descripciones que la ficha repite en 2 o 3 códigos (154 códigos), cada
+  uno con su propio conteo.
+- **El modelo no cambia:** la demanda por categoría es la misma (los
+  pedidos del Anypsa siguen en esmalte, ahora en PIN-219, y los de la Lija
+  en accesorio, ahora en PIN-260), así que el #6 y sus evaluaciones siguen
+  valiendo. Lote de recomendaciones regenerado: ningún producto cambió de
+  estado; salen las 15 de los inactivos.
+- **Postest:** la ficha del postest debe venir con los códigos corregidos
+  (PIN-260 = Lija Grano 090 pliego; PIN-261 y AUTO-0261 ya no están
+  activos). La ficha de ejemplo `datos/fichas_posttest_25-09-2026.xlsx`
+  (cargada como `prueba`) todavía usa los códigos anteriores.
+- **`recalcular_stock` sin `--origen`** deja que el conteo de prueba del
+  10/09 pise el stock real de agosto (242 productos); usar `--origen real`.
+- Respaldos: `artefactos/respaldos/respaldo_antes_pretest_corregido_20261029_1344.dump`
+  y `respaldo_antes_catalogo_20261029_1430.dump`.
+
+### Cuadre del COI del pretest (primera ficha, 28/10/2026)
+
+Corresponde a `datos/fichas_pretest_agosto_2026.xlsx`, reemplazada por la
+ficha corregida (sección anterior). Se conserva porque explica el valor
+9 792,80.
 
 Fórmula vigente (`calcular_coi()`, `inventario/servicios/indicadores.py`):
 
@@ -418,7 +476,7 @@ atendidas con precio 0.
 # 0. Respaldo completo antes de tocar nada (es la forma de revertir).
 pg_dump -U diego -Fc inventario_ia > respaldo_antes_postest_$(date +%Y%m%d_%H%M).dump
 
-# 1. Foto exacta del pretest (debe dar EI 56.32%, NS 58.08%, COI S/ 5421.40).
+# 1. Foto exacta del pretest (debe dar EI 56.15%, NS 59.23%, COI S/ 5341.40).
 python manage.py reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 \
     --guardar artefactos/indicadores/pretest_agosto.json
 

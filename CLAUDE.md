@@ -44,10 +44,15 @@ indicadores.
   `unidades_no_atendidas`, `productos_afectados`,
   `lineas_precio_reconstruido`), que muestran reportes, el dashboard y
   `reporte_indicadores`.
-  Cuadre del pretest (28/10/2026): CA 1 050,00 + PD 4 371,40 (91 líneas,
-  602 u., 79 productos) = **5 421,40**; las 91 líneas coinciden una por
-  una con `datos/fichas_pretest_agosto_2026.xlsx`, que también da
-  5 421,40. Un COI de 9 792,80 es el PD sumado con su propia fila TOTAL
+  Pretest vigente (29/10/2026): ficha corregida
+  `datos/PRETEST_TESIS_FINAL.xlsx`, cargada con `cargar_datos
+  --reemplazar-mes 2026-08`: EI 56,15 % (146/260), NS 59,23 % (154/260),
+  COI CA 1 050,00 + PD 4 291,40 (90 líneas, 592 u., 78 productos) =
+  **5 341,40**. Tabla de correcciones (`comparar_fichas`) y de cambios del
+  catálogo (`reconstruir_catalogo`) en `artefactos/correcciones/`; detalle
+  en "Pretest corregido" del README. Cuadre de la primera ficha
+  (28/10/2026, reemplazada): CA 1 050,00 + PD 4 371,40 (91 líneas,
+  602 u., 79 productos) = 5 421,40. Un COI de 9 792,80 es el PD sumado con su propia fila TOTAL
   (2 × 4 371,40): se corrige la ficha/documento, no el sistema. El CA de
   la ficha declara 25/07–24/08 y el PD 01/08–31/08; `CostoAlmacenamiento`
   solo guarda el mes, `cargar_datos` lo advierte y no cambia montos.
@@ -163,6 +168,21 @@ indicadores.
   `--origen real` y se separa por fechas (no hace falta otro origen). Test
   `CongelamientoPretestTests`; procedimiento en "Importar el postest" del
   README.
+- `cargar_datos --reemplazar-mes AAAA-MM`: sustituye solo ese mes del
+  origen por una ficha corregida (borra pedidos, conteos, costos y los
+  ajustes del importador de ese mes; no borra productos ni toca otros
+  meses; exige que el archivo traiga solo ese mes) y recalcula el stock
+  con movimientos del mismo origen. `recalcular_stock --origen`: sin él,
+  un ajuste de prueba posterior pisa el stock real.
+- Catálogo vigente = los 260 productos de `1_EI` de la ficha del pretest
+  (`reconstruir_catalogo`, `inventario/servicios/catalogo_ficha.py`):
+  nombre/color/presentación de la ficha, precio y costo de `3_COI_PD`,
+  categoría conservada por código; los 15 que no están en la ficha quedan
+  `activo=False` (no se borran). La ficha repite 71 descripciones en 2–3
+  códigos, y 6 categorías no coinciden con el nombre (p. ej. PIN-174
+  "Lija Grano 180" en látex): reportados, sin cambiar.
+  `comparar_fichas` (`inventario/servicios/correcciones_ficha.py`) arma la
+  tabla de correcciones entre dos versiones de una ficha.
 - Comando `reporte_indicadores --desde --hasta [--origen] [--detalle]
   [--guardar f.json] [--comparar f.json]`: EI/NS/COI de un periodo con el
   COI desglosado; `--comparar` falla si algún valor cambió. No escribe.

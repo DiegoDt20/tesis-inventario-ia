@@ -13,8 +13,10 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from inventario.management.commands.recalcular_stock import recalcular_stock
 from inventario.servicios.indicadores import calcular_coi, calcular_ei, calcular_ns
 from inventario.models import (
+    Anomalia,
     ConteoDetalle,
     ConteoFisico,
     CostoAlmacenamiento,
@@ -106,6 +108,15 @@ class Command(BaseCommand):
             help='Borra los datos previos del mismo origen antes de cargar.',
         )
         parser.add_argument(
+            '--reemplazar-mes', metavar='AAAA-MM',
+            help=(
+                'Reemplaza los datos de ese mes del mismo origen (pedidos, conteos, '
+                'costos de almacenamiento y los ajustes de stock que generó la '
+                'importación) por los del archivo, que debe traer solo ese mes. No '
+                'borra productos ni otros meses. Para cargar una ficha corregida.'
+            ),
+        )
+        parser.add_argument(
             '--dry-run', action='store_true',
             help='Procesa y reporta el resultado sin escribir cambios en la base de datos.',
         )
@@ -115,6 +126,10 @@ class Command(BaseCommand):
         origen = options['origen']
         limpiar = options['limpiar']
         dry_run = options['dry_run']
+        mes_reemplazo = self._parsear_mes(options.get('reemplazar_mes'))
+
+        if limpiar and mes_reemplazo:
+            raise CommandError('--limpiar y --reemplazar-mes no se pueden usar juntos.')
 
         if not ruta.exists():
             raise CommandError(f'No se encontró el archivo: {ruta}')
@@ -150,6 +165,10 @@ class Command(BaseCommand):
                 self._limpiar_origen(origen)
 
             usuario = self._obtener_usuario_importacion()
+            borrado = None
+            if mes_reemplazo:
+                borrado = self._borrar_mes(origen, mes_reemplazo, usuario)
+                meses_previos.discard(mes_reemplazo)
             productos_por_codigo = {}
             productos_por_descripcion = {}
 
@@ -177,7 +196,11 @@ class Command(BaseCommand):
             )
             self._cargar_coi_pd(filas_pd, pedidos_por_numero, productos_por_codigo, resumen)
 
+            if mes_reemplazo:
+                self._verificar_mes_reemplazo(mes_reemplazo, resumen.meses_cargados)
             self._verificar_periodos(origen, meses_previos, resumen.meses_cargados, limpiar)
+            if borrado is not None:
+                self._cerrar_reemplazo(borrado, mes_reemplazo, origen, usuario)
 
             self._imprimir_resumen(resumen)
             self._imprimir_indicadores(origen, resumen.meses_cargados)
@@ -355,6 +378,102 @@ class Command(BaseCommand):
         ConteoFisico.objects.filter(origen=origen).delete()
         CostoAlmacenamiento.objects.filter(origen=origen).delete()
         Producto.objects.filter(origen=origen).delete()
+
+    @staticmethod
+    def _parsear_mes(texto):
+        """'AAAA-MM' -> date del primer día del mes (None si no se indicó)."""
+        if not texto:
+            return None
+        try:
+            return datetime.strptime(texto.strip(), '%Y-%m').date()
+        except ValueError:
+            raise CommandError(f'--reemplazar-mes espera AAAA-MM (p. ej. 2026-08), no "{texto}".')
+
+    @staticmethod
+    def _rango_mes(mes):
+        siguiente = (mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+        return mes, siguiente - timedelta(days=1)
+
+    def _borrar_mes(self, origen, mes, usuario):
+        """Borra los datos de un mes del origen para volver a cargarlo desde
+        una ficha corregida (--reemplazar-mes). Mismo criterio de periodo que
+        _meses_con_datos: pedidos por fecha_solicitud, conteos por
+        fecha_corte y costos por periodo_mes. De Movimiento solo se borran
+        los ajustes que generó la propia importación (usuario técnico) en
+        ese mes; un movimiento registrado en el sistema no viene de la ficha
+        y se conserva. Los productos no se borran.
+
+        Las anomalías de las líneas del conteo borrado se van con ellas
+        (CASCADE), incluida su revisión: se informa cuántas lo estaban.
+        Devuelve lo borrado y los productos cuyo stock hay que recalcular."""
+        desde, hasta = self._rango_mes(mes)
+        pedidos = Pedido.objects.filter(
+            origen=origen, fecha_solicitud__date__gte=desde, fecha_solicitud__date__lte=hasta,
+        )
+        conteos = ConteoFisico.objects.filter(origen=origen, fecha_corte__gte=desde, fecha_corte__lte=hasta)
+        costos = CostoAlmacenamiento.objects.filter(origen=origen, periodo_mes=mes)
+        ajustes = Movimiento.objects.filter(
+            origen=origen, usuario=usuario, tipo=Movimiento.Tipo.AJUSTE,
+            fecha__date__gte=desde, fecha__date__lte=hasta,
+        )
+        anomalias = Anomalia.objects.filter(conteo_detalle__conteo__in=conteos)
+
+        borrado = {
+            'lineas_pedido': PedidoDetalle.objects.filter(pedido__in=pedidos).count(),
+            'pedidos': pedidos.count(),
+            'conteos': conteos.count(),
+            'lineas_conteo': ConteoDetalle.objects.filter(conteo__in=conteos).count(),
+            'costos': costos.count(),
+            'ajustes': ajustes.count(),
+            'anomalias': anomalias.count(),
+            'anomalias_revisadas': anomalias.filter(revisada=True).count(),
+            'productos': set(ajustes.values_list('producto_id', flat=True)),
+        }
+        # Sin Movimiento.delete() (que revierte el stock uno por uno): el
+        # stock de estos productos se recalcula entero al final de la carga.
+        ajustes.delete()
+        PedidoDetalle.objects.filter(pedido__in=pedidos).delete()
+        pedidos.delete()
+        conteos.delete()
+        costos.delete()
+        return borrado
+
+    def _verificar_mes_reemplazo(self, mes, meses_cargados):
+        """Con --reemplazar-mes el archivo tiene que traer ese mes y solo
+        ese: si trajera otro, la carga lo tocaría sin haberlo pedido."""
+        if meses_cargados != {mes}:
+            otros = ', '.join(m.strftime('%m/%Y') for m in sorted(meses_cargados)) or 'nada'
+            raise CommandError(
+                f'--reemplazar-mes {mes:%Y-%m}: el archivo trae datos de {otros}, y debe '
+                f'traer solo {mes:%m/%Y}. No se escribió nada.'
+            )
+
+    def _cerrar_reemplazo(self, borrado, mes, origen, usuario):
+        """Recalcula el stock de los productos con ajustes borrados o nuevos
+        del mes, solo con movimientos del origen cargado (ver
+        recalcular_stock), e informa lo que se reemplazó."""
+        desde, hasta = self._rango_mes(mes)
+        productos = borrado['productos'] | set(
+            Movimiento.objects.filter(
+                origen=origen, usuario=usuario, tipo=Movimiento.Tipo.AJUSTE,
+                fecha__date__gte=desde, fecha__date__lte=hasta,
+            ).values_list('producto_id', flat=True)
+        )
+        cambios = recalcular_stock(Producto.objects.filter(pk__in=productos), origen=origen)
+
+        self.stdout.write(self.style.WARNING(f'\nReemplazo de {mes:%m/%Y} (origen "{origen}"). Se borró:'))
+        self.stdout.write(f'  Pedidos:            {borrado["pedidos"]} ({borrado["lineas_pedido"]} línea(s))')
+        self.stdout.write(f'  Conteos físicos:    {borrado["conteos"]} ({borrado["lineas_conteo"]} línea(s))')
+        self.stdout.write(f'  Costos de almacén:  {borrado["costos"]}')
+        self.stdout.write(f'  Ajustes de stock de la importación: {borrado["ajustes"]}')
+        self.stdout.write(
+            f'  Anomalías de esas líneas de conteo: {borrado["anomalias"]} '
+            f'({borrado["anomalias_revisadas"]} revisada(s); se pierde su revisión, '
+            'volver a correr detectar_anomalias)'
+        )
+        self.stdout.write(f'  Stock recalculado: {len(cambios)} producto(s) cambiaron')
+        for codigo, antes, despues in cambios:
+            self.stdout.write(f'    {codigo}: {antes} -> {despues}')
 
     @staticmethod
     def _parsear_valor_fecha(valor):
