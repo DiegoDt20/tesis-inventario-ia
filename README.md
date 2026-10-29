@@ -330,11 +330,9 @@ La empresa entregó una versión corregida de la ficha del pretest
 - **Efecto en el modelo:** la reasignación de códigos no cambia la demanda
   diaria por categoría (verificado día por día), pero la corrección de
   categorías sí. Mueve 29 u. de PIN-170 (16, 29 y 31/08) de esmalte a látex
-  y 9 u. de PIN-171 (21/08) de solvente a esmalte. El #6 se ajustó y se
-  evaluó con la clasificación anterior, así que sus reportes de evaluación
-  (`evaluar_predicciones`, `evaluar_ablacion`) no se volvieron a correr y
-  corresponden a esa clasificación. Las predicciones se regeneraron con el
-  #6 sobre la clasificación nueva.
+  y 9 u. de PIN-171 (21/08) de solvente a esmalte. Por eso se reentrenó y
+  se volvió a evaluar: ver [Reentrenamiento con la clasificación corregida
+  (modelo #7)](#reentrenamiento-con-la-clasificación-corregida-modelo-7).
 - **`predecir_demanda`** extiende ahora cada categoría hasta el último día
   del histórico con cero los días sin pedidos (`densificar_periodo`, como
   el walk-forward). Antes, al quedar esmalte sin pedidos el 31/08 (el de
@@ -1310,6 +1308,44 @@ las tres líneas base.
   de lead time (16.4% vs. 18.5%), pero no de forma consistente entre
   orígenes."
 - El horizonte diario no distingue a ninguna configuración de las medias.
+
+## Reentrenamiento con la clasificación corregida (modelo #7)
+
+El 29/10/2026 se corrigieron 6 categorías según el nombre de la ficha (ver
+[Pretest corregido](#pretest-corregido-29102026)), lo que cambió la
+demanda diaria de esmalte, látex y solvente. Se repitió el procedimiento
+del #6 sin cambiar nada: `entrenar_ajustado --origen real --nivel categoria
+--dias-test 7` (escalado activado; accesorio ×5,829, el mismo factor),
+`evaluar_predicciones --origen real` y `evaluar_ablacion --origen real`.
+El modelo **#7** quedó activo y el #6 inactivo. Las secciones anteriores
+conservan las cifras del #6.
+
+Comparación generada desde los cuatro reportes JSON
+(`artefactos/reentreno_20261029/comparacion_6_vs_7.md`, con el detalle
+por línea base y configuración):
+
+| Ventana de lead time (H = 7) | #6 | #7 | Cambio |
+|---|---|---|---|
+| Exactitud total | 83,6 % | 83,5 % | −0,1 pp |
+| accesorio | 67,2 % | 66,3 % | −0,9 pp |
+| esmalte | 86,8 % | 88,4 % | +1,6 pp |
+| látex | 83,7 % | 81,8 % | −1,9 pp |
+| vs. media por categoría (orígenes ganados, p bilateral) | 9 de 11, 0,065 | 9 de 11, 0,065 | = |
+| vs. media móvil 7 días | 10 de 11, 0,012 | 9 de 11, 0,065 | peor |
+| vs. último valor | 10 de 11, 0,012 | 10 de 11, 0,012 | = |
+| Ablación A / A con escalado / B / C (exactitud total) | 79,3 / 81,5 / 65,3 / 83,6 % | 79,9 / 82,0 / 64,0 / 83,5 % | |
+| C vs. A con escalado (orígenes ganados, p) | 7 de 11, 0,549 | 6 de 11, 1,000 | peor |
+
+- La exactitud de la ventana baja 0,1 pp, y el #7 sigue superando en WAPE
+  total a las tres líneas base.
+- Contra la media móvil gana en un origen menos.
+- La ventaja de C sobre A con escalado se achica (de 2,1 a 1,5 pp, y 6 de
+  11 orígenes): la conclusión de que el aporte viene sobre todo del
+  escalado se mantiene y queda más marcada.
+- Diario: 48,8 % → 46,1 % (−2,7 pp); sigue sin superar a las dos medias.
+- Lote de recomendaciones con el #7: ningún producto cambió de estado
+  respecto del lote del #6 (19/30/185/26). La cantidad sugerida de látex
+  baja de 771,0 a 730,5 unidades.
 
 ## Pantalla del modelo (`/modelo/`)
 

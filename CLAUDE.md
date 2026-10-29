@@ -182,8 +182,10 @@ indicadores.
   códigos (reportado, sin cambiar). Las 6 categorías que no coincidían
   con el nombre de la ficha se corrigieron deduciéndolas del nombre
   (29/10/2026); eso movió 29 u. de esmalte a látex y 9 de solvente a
-  esmalte, así que el #6 y sus reportes de evaluación son de la
-  clasificación anterior (no se reentrenó ni se volvió a evaluar).
+  esmalte. Por eso se reentrenó (modelo **#7**, vigente desde el
+  29/10/2026, misma configuración que el #6) y se volvieron a correr
+  `evaluar_predicciones` y `evaluar_ablacion`; ver "Reentrenamiento con la
+  clasificación corregida (modelo #7)" del README.
   `predecir_demanda` (nivel categoría) extiende cada serie hasta el último
   día del histórico (`densificar_periodo`). `cargar_datos --responsable`
   registra el responsable del conteo (agosto: los investigadores, con
@@ -308,7 +310,10 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     Es una regla general: el piso medido del base es 10.76 u/día y ambas
     reglas clasifican igual (solo accesorio, 7.8–9.9 u/día). El factor usa
     solo los días ≤ origen (tests `EscaladoSinFugaTests`) o, en
-    `entrenar_ajustado`, solo los de entrenamiento. Vigente **#6**
+    `entrenar_ajustado`, solo los de entrenamiento. Vigente **#7** desde
+    el 29/10/2026 (mismo comando que el #6 sobre la clasificación
+    corregida; ventana 83.5% de exactitud, diario 46.1%; #6 inactivo). Las
+    cifras siguientes son del #6 (clasificación anterior): #6
     (`entrenar_ajustado --origen real --nivel categoria --dias-test 7`;
     accesorio ×5.829; #5 inactivo). Ventana: WAPE total 20.6% → 16.4%
     (supera a las tres líneas base; baja en 11 de 11 orígenes), accesorio
