@@ -36,7 +36,27 @@ indicadores.
   marcan así las líneas que quedaron en 0 (pedido importado antes de
   conocer el precio del producto) y se completan con
   `cargar_precios --completar-pedidos`, así que el orden de carga
-  (precios antes o después de pedidos) no cambia el COI.
+  (precios antes o después de pedidos) no cambia el COI. `cargar_datos`
+  congela en cada línea no atendida el precio y el costo de su fila en
+  `3_COI_PD` (no el del catálogo al importar). PD = utilidad no percibida
+  (margen), nunca el precio completo. `calcular_coi()` devuelve además el
+  desglose (`conceptos_almacenamiento`, `lineas_desabastecimiento`,
+  `unidades_no_atendidas`, `productos_afectados`,
+  `lineas_precio_reconstruido`), que muestran reportes, el dashboard y
+  `reporte_indicadores`.
+  Pretest vigente (29/10/2026): ficha corregida
+  `datos/PRETEST_TESIS_FINAL.xlsx`, cargada con `cargar_datos
+  --reemplazar-mes 2026-08`: EI 56,15 % (146/260), NS 59,23 % (154/260),
+  COI CA 1 050,00 + PD 4 291,40 (90 líneas, 592 u., 78 productos) =
+  **5 341,40**. Tabla de correcciones (`comparar_fichas`) y de cambios del
+  catálogo (`reconstruir_catalogo`) en `artefactos/correcciones/`; detalle
+  en "Pretest corregido" del README. Cuadre de la primera ficha
+  (28/10/2026, reemplazada): CA 1 050,00 + PD 4 371,40 (91 líneas,
+  602 u., 79 productos) = 5 421,40. Un COI de 9 792,80 es el PD sumado con su propia fila TOTAL
+  (2 × 4 371,40): se corrige la ficha/documento, no el sistema. El CA de
+  la ficha declara 25/07–24/08 y el PD 01/08–31/08; `CostoAlmacenamiento`
+  solo guarda el mes, `cargar_datos` lo advierte y no cambia montos.
+  Detalle en "Cuadre del COI del pretest" del README.
   `calcular_coi()` (`inventario/servicios/indicadores.py`) **no** lee el
   modelo `Merma` directamente. Las mermas ya entran al COI por otra vía: `cargar_datos` (hoja `3_COI_CA`) carga el monto agregado
   "Mermas del periodo" como una fila más de `CostoAlmacenamiento`, porque
@@ -140,6 +160,41 @@ indicadores.
   importa las fichas de registro (Excel con hojas `1_EI`, `2_NS`, `3_COI_CA`,
   `3_COI_PD`) y calcula los tres indicadores desde la base de datos para
   verificar que la importación no deformó los datos.
+- Pretest congelado: `cargar_datos` rechaza (sin escribir nada) datos de
+  un mes que ya tiene datos del mismo origen y un `--limpiar` que borraría
+  meses que el archivo no vuelve a cargar; reporta los indicadores solo
+  del periodo cargado; guarda `PedidoDetalle.fecha_requerida` y calcula
+  "¿A tiempo?" con las fechas si la celda llega vacía. El postest va con
+  `--origen real` y se separa por fechas (no hace falta otro origen). Test
+  `CongelamientoPretestTests`; procedimiento en "Importar el postest" del
+  README.
+- `cargar_datos --reemplazar-mes AAAA-MM`: sustituye solo ese mes del
+  origen por una ficha corregida (borra pedidos, conteos, costos y los
+  ajustes del importador de ese mes; no borra productos ni toca otros
+  meses; exige que el archivo traiga solo ese mes) y recalcula el stock
+  con movimientos del mismo origen. `recalcular_stock --origen`: sin él,
+  un ajuste de prueba posterior pisa el stock real.
+- Catálogo vigente = los 260 productos de `1_EI` de la ficha del pretest
+  (`reconstruir_catalogo`, `inventario/servicios/catalogo_ficha.py`):
+  nombre/color/presentación de la ficha, precio y costo de `3_COI_PD`,
+  categoría conservada por código; los 15 que no están en la ficha quedan
+  `activo=False` (no se borran). La ficha repite 71 descripciones en 2–3
+  códigos (reportado, sin cambiar). Las 6 categorías que no coincidían
+  con el nombre de la ficha se corrigieron deduciéndolas del nombre
+  (29/10/2026); eso movió 29 u. de esmalte a látex y 9 de solvente a
+  esmalte. Por eso se reentrenó (modelo **#7**, vigente desde el
+  29/10/2026, misma configuración que el #6) y se volvieron a correr
+  `evaluar_predicciones` y `evaluar_ablacion`; ver "Reentrenamiento con la
+  clasificación corregida (modelo #7)" del README.
+  `predecir_demanda` (nivel categoría) extiende cada serie hasta el último
+  día del histórico (`densificar_periodo`). `cargar_datos --responsable`
+  registra el responsable del conteo (agosto: los investigadores, con
+  validación del encargado de la tienda).
+  `comparar_fichas` (`inventario/servicios/correcciones_ficha.py`) arma la
+  tabla de correcciones entre dos versiones de una ficha.
+- Comando `reporte_indicadores --desde --hasta [--origen] [--detalle]
+  [--guardar f.json] [--comparar f.json]`: EI/NS/COI de un periodo con el
+  COI desglosado; `--comparar` falla si algún valor cambió. No escribe.
 - Comando `cargar_precios --archivo precios.xlsx [--hoja nombre]
   [--completar-pedidos] [--dry-run]`
   (`inventario/management/commands/cargar_precios.py`): actualiza
@@ -255,7 +310,17 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
     Es una regla general: el piso medido del base es 10.76 u/día y ambas
     reglas clasifican igual (solo accesorio, 7.8–9.9 u/día). El factor usa
     solo los días ≤ origen (tests `EscaladoSinFugaTests`) o, en
-    `entrenar_ajustado`, solo los de entrenamiento. Vigente **#6**
+    `entrenar_ajustado`, solo los de entrenamiento. Vigente **#7** desde
+    el 29/10/2026 (mismo comando que el #6 sobre la clasificación
+    corregida; ventana 83.5% de exactitud, diario 46.1%; división única
+    diaria 48.6%, guardada en el #7; #6 inactivo). `entrenar_ajustado` y
+    `evaluar_predicciones --no-walk-forward` densifican cada categoría
+    hasta el último día del histórico (antes omitían un último día sin
+    pedidos). Las métricas de prueba del #7 se recalcularon en su registro
+    con 21 filas (MAE 13.42, R² 0.283; antes 12.20 y 0.404 con 20); el
+    motivo y los valores anteriores quedan en `ModeloEntrenado.notas`
+    (migración 0030). Las
+    cifras siguientes son del #6 (clasificación anterior): #6
     (`entrenar_ajustado --origen real --nivel categoria --dias-test 7`;
     accesorio ×5.829; #5 inactivo). Ventana: WAPE total 20.6% → 16.4%
     (supera a las tres líneas base; baja en 11 de 11 orígenes), accesorio
@@ -360,7 +425,7 @@ Ya no están fuera de alcance: los tres están implementados y en uso.
   (`paraphrase-multilingual-MiniLM-L12-v2`, local); `recuperador.py` trae
   contexto por similitud coseno; `asistente.py` arma el prompt y llama al
   LLM configurado (`proveedores.py`: `ollama` local por defecto, o
-  `anthropic` = Codex vía API externa con el SDK `anthropic`; ver
+  `anthropic` = Claude vía API externa con el SDK `anthropic`; ver
   `LLM_PROVEEDOR`/`LLM_MODELO`/`LLM_URL`/`ANTHROPIC_API_KEY`, la clave
   solo en `.env`); `anonimizador.py` redacta nombres de clientes (sin
   distinguir mayúsculas), razón social, correos y teléfonos antes de
