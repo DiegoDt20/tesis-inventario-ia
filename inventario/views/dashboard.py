@@ -8,10 +8,10 @@ import json
 from datetime import date, timedelta
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Case, Count, IntegerField, Max, Sum, When
+from django.db.models import Case, Count, IntegerField, Max, Min, Sum, When
 from django.shortcuts import render
 
-from ..models import Anomalia, Categoria, PedidoDetalle, Prediccion, Producto, Recomendacion
+from ..models import Anomalia, Categoria, Pedido, PedidoDetalle, Prediccion, Producto, Recomendacion
 from ..servicios.indicadores import calcular_coi, calcular_ei, calcular_ns
 from ._comunes import _origen_o_defecto, _variacion_periodo, periodo_anterior, resolver_rango_periodo
 from .anomalias import _anomalias_no_revisadas
@@ -206,10 +206,10 @@ def grafico_prediccion_demanda(origen, tipo, valor):
     dashboard (el filtro Hoy/7 días/30 días/Personalizado, u otro): son dos
     cosas distintas. El pronóstico siempre se agrega completo, aunque sus
     fechas caigan más allá de "hoy" — ese tramo futuro es justamente lo que
-    hay que ver. Real y pronóstico nunca se mezclan en el mismo punto: se
-    separan por 'fecha_corte' (el día justo antes de que empiece el
-    pronóstico), que la plantilla dibuja pasando de línea continua a
-    punteada."""
+    hay que ver. 'fecha_corte' es el día justo antes de que empiece el
+    pronóstico. Los días pronosticados llevan además 'real' cuando ya hay
+    venta cargada de esas fechas (None si todavía no), y la plantilla
+    dibuja las dos líneas juntas en ese tramo."""
     if tipo is None:
         return None
 
@@ -262,10 +262,26 @@ def grafico_prediccion_demanda(origen, tipo, valor):
         dias_historico = 30
     inicio_historico = fin_historico - timedelta(days=dias_historico - 1)
 
+    # Primer y último día con pedidos cargados (de cualquier producto del
+    # origen). Antes del primero no hay datos, no ventas en 0: la ventana no
+    # retrocede más allá, para no abrir con un tramo plano que parece un mes
+    # sin ventas.
+    pedidos_qs = Pedido.objects.all()
+    if origen:
+        pedidos_qs = pedidos_qs.filter(origen=origen)
+    limites = pedidos_qs.aggregate(primero=Min('fecha_solicitud__date'), ultimo=Max('fecha_solicitud__date'))
+    primer_pedido, ultimo_pedido = limites['primero'], limites['ultimo']
+    if primer_pedido and inicio_historico < primer_pedido <= fin_historico:
+        inicio_historico = primer_pedido
+
+    # La venta real se trae también para los días pronosticados: si ya hay
+    # pedidos cargados de ese tramo (el postest), el gráfico los dibuja
+    # junto al pronóstico para ver cuánto acertó.
+    fin_serie = pronostico[-1][0] if pronostico else fin_historico
     detalles_qs = PedidoDetalle.objects.filter(
         producto_id__in=productos_ids,
         pedido__fecha_solicitud__date__gte=inicio_historico,
-        pedido__fecha_solicitud__date__lte=fin_historico,
+        pedido__fecha_solicitud__date__lte=fin_serie,
     )
     if origen:
         detalles_qs = detalles_qs.filter(pedido__origen=origen)
@@ -279,14 +295,39 @@ def grafico_prediccion_demanda(origen, tipo, valor):
     while dia <= fin_historico:
         puntos.append({'fecha': dia.isoformat(), 'real': reales_por_fecha.get(dia, 0.0), 'pronostico': None})
         dia += timedelta(days=1)
+    # Hasta qué día hay venta real cargada (de cualquier producto del
+    # origen): un día pronosticado anterior o igual a ese sin pedidos de
+    # esta serie es un 0 real; uno posterior todavía no ocurrió (None).
+    # "comparacion" suma solo los días que tienen las dos cosas, para que
+    # el total real y el pronosticado cubran exactamente las mismas fechas.
+    comparados = []
     for fecha_objetivo, total in pronostico:
-        puntos.append({'fecha': fecha_objetivo.isoformat(), 'real': None, 'pronostico': total})
+        real = None
+        if ultimo_pedido and fecha_objetivo <= ultimo_pedido:
+            real = reales_por_fecha.get(fecha_objetivo, 0.0)
+            comparados.append((fecha_objetivo, real, total))
+        puntos.append({'fecha': fecha_objetivo.isoformat(), 'real': real, 'pronostico': total})
+    comparacion = None
+    if comparados:
+        total_real = sum(real for _, real, _ in comparados)
+        total_pronostico = sum(total for _, _, total in comparados)
+        comparacion = {
+            'desde': comparados[0][0],
+            'hasta': comparados[-1][0],
+            'real': total_real,
+            'pronostico': total_pronostico,
+            # Cuánto se pasó (+) o se quedó corto (−) el pronóstico respecto
+            # de lo vendido; None si no se vendió nada (no hay base).
+            'diferencia_pct': (total_pronostico - total_real) / total_real * 100 if total_real else None,
+        }
 
     return {
         'tipo': tipo,
         'etiqueta': etiqueta,
         'puntos_json': json.dumps(puntos),
         'hay_pronostico': bool(pronostico),
+        'hay_real_en_pronostico': bool(comparados),
+        'comparacion': comparacion,
         'fecha_corte': fin_historico if pronostico else None,
     }
 

@@ -352,9 +352,11 @@ class GraficoPrediccionSerieTests(TestCase):
             puntos = self.json.loads(respuesta.context['grafico_prediccion']['puntos_json'])
             fechas = [date.fromisoformat(p['fecha']) for p in puntos]
 
-            # 60 días de histórico (el triple del horizonte, tope 60) + 30 de pronóstico.
-            self.assertEqual(len(puntos), 90, categoria)
-            self.assertEqual(fechas[0], date(2026, 7, 3))
+            # El histórico arranca en el primer día con pedidos cargados
+            # (03/08, de esmalte), igual para las tres categorías: 29 días
+            # de histórico + 30 de pronóstico.
+            self.assertEqual(len(puntos), 59, categoria)
+            self.assertEqual(fechas[0], date(2026, 8, 3))
             self.assertEqual(fechas[-1], date(2026, 9, 30))
             self.assertEqual(
                 fechas, [fechas[0] + self.timedelta(days=i) for i in range(len(fechas))],
@@ -379,3 +381,35 @@ class GraficoPrediccionSerieTests(TestCase):
         self.assertIn('''<meta name="htmx-config" content='{"attributesToSettle": ["class"]}'>''', pagina)
         self.assertIn('htmx:beforeCleanupElement', pagina)
         self.assertRegex(pagina, r'y: \{[^}]*min: 0,')
+
+    def test_los_dias_pronosticados_traen_la_venta_real_si_ya_esta_cargada(self):
+        """Con pedidos cargados hasta el 10/09, los días pronosticados hasta
+        esa fecha llevan su venta real (0 si la categoría no vendió ese día)
+        y los posteriores None: todavía no ocurrieron."""
+        from django.utils import timezone
+        pedido = Pedido.objects.create(
+            fecha_solicitud=timezone.make_aware(timezone.datetime(2026, 9, 10)), cliente='C', origen='real',
+        )
+        PedidoDetalle.objects.create(
+            pedido=pedido, producto=Producto.objects.get(codigo='PIN-latex'), cantidad_solicitada=4, cantidad_atendida=4,
+        )
+        self.client.force_login(self.usuario)
+        esperado_10_09 = {'latex': 4.0, 'esmalte': 0.0}
+        for categoria, real_10_09 in esperado_10_09.items():
+            respuesta = self.client.get(
+                reverse('inventario:dashboard_grafico_prediccion'), {'serie_grafico': f'categoria:{categoria}'},
+            )
+            grafico = respuesta.context['grafico_prediccion']
+            self.assertTrue(grafico['hay_real_en_pronostico'])
+            puntos = {p['fecha']: p for p in self.json.loads(grafico['puntos_json'])}
+            self.assertEqual(len(puntos), 59)
+            # Del 01/09 al 10/09: 10 días comparables, 2,5 u pronosticadas cada uno.
+            comparacion = grafico['comparacion']
+            self.assertEqual((comparacion['desde'], comparacion['hasta']), (date(2026, 9, 1), date(2026, 9, 10)))
+            self.assertEqual(comparacion['real'], real_10_09)
+            self.assertEqual(comparacion['pronostico'], 25.0)
+            self.assertEqual(comparacion['diferencia_pct'], 525.0 if real_10_09 else None)
+            self.assertEqual(puntos['2026-09-05']['real'], 0.0)
+            self.assertEqual(puntos['2026-09-10']['real'], real_10_09)
+            self.assertEqual(puntos['2026-09-10']['pronostico'], 2.5)
+            self.assertIsNone(puntos['2026-09-11']['real'])

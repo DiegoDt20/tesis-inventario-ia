@@ -53,13 +53,22 @@ excedan ese rango.
             <div class="lienzo-grafico-grande">
                 <canvas id="grafico-prediccion-demanda"></canvas>
             </div>
+            {% if grafico_prediccion.comparacion %}
+                {% with c=grafico_prediccion.comparacion %}
+                    <p class="grafico-comparacion">
+                        Del {{ c.desde|date:'d/m' }} al {{ c.hasta|date:'d/m' }} se vendieron
+                        <strong>{{ c.real|floatformat:"0g" }} u</strong> y el pronóstico era
+                        <strong>{{ c.pronostico|floatformat:"0g" }} u</strong>{% if c.diferencia_pct is not None %}:
+                        {% if c.diferencia_pct >= 0 %}{{ c.diferencia_pct|floatformat:1 }} % de más{% else %}{{ c.diferencia_pct|floatformat:1|cut:"-" }} % de menos{% endif %}{% endif %}.
+                    </p>
+                {% endwith %}
+            {% endif %}
             <div class="grafico-leyenda-corte">
-                <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea"></span> Histórico real</span>
+                <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea"></span> Venta real</span>
                 {% if grafico_prediccion.hay_pronostico %}
-                    <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea punteada"></span> Pronóstico</span>
+                    <span class="grafico-leyenda-item"><span class="grafico-leyenda-linea punteada pronostico"></span> Pronóstico</span>
                     <span title="El pronóstico se ancla al último dato real disponible, no a la fecha de hoy.">
-                        Histórico hasta el <strong>{{ grafico_prediccion.fecha_corte|date:'d/m/Y' }}</strong>:
-                        el pronóstico parte de esa fecha, no de hoy.
+                        Pronóstico hecho con datos hasta el <strong>{{ grafico_prediccion.fecha_corte|date:'d/m/Y' }}</strong>{% if grafico_prediccion.hay_real_en_pronostico %}; después de esa fecha, la venta real es la que ocurrió y el modelo no la conocía{% else %}: parte de esa fecha, no de hoy{% endif %}.
                     </span>
                 {% else %}
                     <span>
@@ -91,13 +100,22 @@ excedan ese rango.
                         }
 
                         const datos = {{ grafico_prediccion.puntos_json|safe }};
-                        const etiquetas = datos.map(function (p) { return p.fecha; });
+                        // Eje X en día/mes, como se escriben las fechas en
+                        // el resto de la interfaz (la serie viene en ISO).
+                        const etiquetas = datos.map(function (p) {
+                            const partes = p.fecha.split('-');
+                            return partes[2] + '/' + partes[1];
+                        });
                         let indiceCorte = datos.findIndex(function (p) { return p.pronostico !== null; });
                         if (indiceCorte === -1) {
                             indiceCorte = datos.length;
                         }
 
-                        const valoresHistorico = datos.map(function (p, i) { return i < indiceCorte ? p.real : null; });
+                        // La venta real sigue después del corte cuando ya
+                        // hay pedidos cargados de los días pronosticados
+                        // (null donde todavía no): ahí se ven las dos líneas.
+                        const valoresHistorico = datos.map(function (p) { return p.real; });
+                        const hayRealEnPronostico = {{ grafico_prediccion.hay_real_en_pronostico|yesno:"true,false" }};
                         const valoresPronostico = datos.map(function (p, i) {
                             if (i < indiceCorte - 1) return null;
                             if (i === indiceCorte - 1) return p.real;
@@ -114,6 +132,11 @@ excedan ese rango.
                         const colorTexto = estilos.getPropertyValue('--texto-tenue').trim();
                         const colorGrilla = estilos.getPropertyValue('--linea').trim();
                         const colorMarca = estilos.getPropertyValue('--marca').trim();
+                        // El pronóstico va en otro color (además del trazo
+                        // punteado) para separarlo de la venta real cuando
+                        // las dos líneas se cruzan.
+                        const colorPronostico = estilos.getPropertyValue('--pigmento-naranja').trim();
+                        const colorPronosticoClaro = 'rgba(' + estilos.getPropertyValue('--pigmento-naranja-rgb').trim() + ', 0.12)';
 
                         Chart.defaults.font.family = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
                         Chart.defaults.font.size = 12;
@@ -156,7 +179,7 @@ excedan ese rango.
                                 labels: etiquetas,
                                 datasets: [
                                     {
-                                        label: 'Histórico real',
+                                        label: 'Venta real',
                                         data: valoresHistorico,
                                         borderColor: colorAcento,
                                         backgroundColor: colorAcentoClaro,
@@ -169,10 +192,13 @@ excedan ese rango.
                                     {
                                         label: 'Pronóstico',
                                         data: valoresPronostico,
-                                        borderColor: colorAcento,
-                                        backgroundColor: colorAcentoClaro,
+                                        borderColor: colorPronostico,
+                                        backgroundColor: colorPronosticoClaro,
                                         borderDash: [6, 4],
-                                        fill: true,
+                                        // Sin relleno cuando se compara con
+                                        // la venta real: dos áreas encimadas
+                                        // no dejan leer ninguna.
+                                        fill: !hayRealEnPronostico,
                                         tension: 0.3,
                                         borderWidth: 2,
                                         pointRadius: 0,
@@ -195,6 +221,16 @@ excedan ese rango.
                                         padding: 10,
                                         cornerRadius: 8,
                                         displayColors: false,
+                                        callbacks: {
+                                            label: function (contexto) {
+                                                if (contexto.parsed.y === null) return null;
+                                                // El punto del corte se repite en
+                                                // el pronóstico solo para unir las
+                                                // líneas: no es un valor pronosticado.
+                                                if (contexto.datasetIndex === 1 && contexto.dataIndex === indiceCorte - 1) return null;
+                                                return contexto.dataset.label + ': ' + contexto.parsed.y.toLocaleString('es-PE', {maximumFractionDigits: 1}) + ' u';
+                                            },
+                                        },
                                     },
                                 },
                                 scales: {

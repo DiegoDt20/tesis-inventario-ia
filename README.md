@@ -1525,6 +1525,18 @@ Látex). La primera carga se veía bien.
   cambio). El eje Y lleva `min: 0`. Vale también para los gráficos de
   reportes, que se reemplazan igual al filtrar.
 
+Después se agregó la comparación con la venta real:
+
+- los días pronosticados llevan también la venta real cuando ya hay
+  pedidos cargados de esas fechas (el postest); un día posterior al último
+  pedido cargado queda vacío, no en 0;
+- venta real en azul y línea continua, pronóstico en naranja y punteado;
+- el histórico arranca en el primer día con pedidos (01/08), no 60 días
+  antes del corte, que eran 29 días de julio en 0 sin datos detrás;
+- debajo, los totales del tramo comparable (01/09–29/09): p. ej. látex
+  912 u vendidas contra 1 046 u pronosticadas, 14,7 % de más; accesorio
+  259 u contra 224 u, 13,5 % de menos.
+
 ## Limitaciones
 
 - El histórico disponible es de 31 días; la literatura recomienda al menos 90 para series temporales.

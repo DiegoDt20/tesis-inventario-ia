@@ -1160,6 +1160,20 @@ a.buscador-fila:hover {
     border-top-style: dashed;
 }
 
+.grafico-leyenda-linea.pronostico {
+    border-top-color: var(--pigmento-naranja);
+}
+
+.grafico-comparacion {
+    font-size: 0.85rem;
+    color: var(--texto-tenue);
+    margin: var(--espacio-2) 0 0;
+}
+
+.grafico-comparacion strong {
+    color: var(--texto);
+}
+
 /* ------------------------------------------------------------------ */
 /* Recomendación destacada del dashboard: una sola tarjeta con la acción
    principal a la vista y la explicación del motor de decisiones detrás de
