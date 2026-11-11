@@ -601,7 +601,7 @@
                                 <td>
                                     {% if m.conjunto_medicion == 'externo' %}
                                         <span class="badge-suave badge-suave-warning">{{ m.get_conjunto_medicion_display }}</span>
-                                        <div class="small text-muted"></div>
+                                        <div class="small text-muted">No comparable con las filas de la microempresa</div>
                                     {% else %}
                                         {{ m.get_conjunto_medicion_display|default:"—" }}
                                     {% endif %}

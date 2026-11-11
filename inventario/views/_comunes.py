@@ -37,13 +37,26 @@ def _origen_o_defecto(request):
     return _parsear_origen(origen_param)
 
 
+def _ultimo_dia_del_mes(fecha):
+    return (fecha.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+
+
+def _es_mes_completo(fecha_inicio, fecha_fin):
+    return (
+        fecha_inicio.day == 1
+        and (fecha_inicio.year, fecha_inicio.month) == (fecha_fin.year, fecha_fin.month)
+        and fecha_fin == _ultimo_dia_del_mes(fecha_fin)
+    )
+
+
 def resolver_rango_periodo(request, origen):
     """Control segmentado del periodo (Hoy / 7 días / 30 días /
     Personalizado), compartido por el dashboard y por reportes.
-    "Personalizado" (o su ausencia) cae al comportamiento de siempre: todo
-    lo que hay cargado, no una ventana arbitraria que podía dejar pedidos
-    reales fuera y mostrar un NS incompleto. Devuelve (fecha_inicio,
-    fecha_fin, rango)."""
+    "Personalizado" sin fechas en la URL muestra el mes calendario completo
+    más reciente con datos: cada periodo medido (pretest, postest) es un
+    mes calendario, y abarcar todo lo cargado sumaba los dos periodos en un
+    solo indicador. Si solo se indica una de las dos fechas, la otra sale
+    del rango con datos. Devuelve (fecha_inicio, fecha_fin, rango)."""
     hoy = date.today()
     rango = request.GET.get('rango')
     fecha_min_disponible, fecha_max_disponible = rango_disponible(origen=origen)
@@ -55,11 +68,30 @@ def resolver_rango_periodo(request, origen):
         fecha_fin, fecha_inicio = hoy, hoy - timedelta(days=29)
     else:
         rango = 'personalizado'
-        fecha_fin = _parsear_fecha(request.GET.get('fecha_fin')) or fecha_max_disponible or hoy
-        fecha_inicio = _parsear_fecha(request.GET.get('fecha_inicio')) or fecha_min_disponible or fecha_fin
+        fin_param = _parsear_fecha(request.GET.get('fecha_fin'))
+        inicio_param = _parsear_fecha(request.GET.get('fecha_inicio'))
+        if fin_param is None and inicio_param is None and fecha_max_disponible:
+            fecha_inicio = fecha_max_disponible.replace(day=1)
+            fecha_fin = _ultimo_dia_del_mes(fecha_max_disponible)
+        else:
+            fecha_fin = fin_param or fecha_max_disponible or hoy
+            fecha_inicio = inicio_param or fecha_min_disponible or fecha_fin
     if fecha_inicio > fecha_fin:
         fecha_inicio, fecha_fin = fecha_fin, fecha_inicio
     return fecha_inicio, fecha_fin, rango
+
+
+def periodo_anterior(fecha_inicio, fecha_fin):
+    """Periodo contra el que se compara el mostrado. Si es un mes calendario
+    completo, el mes calendario anterior completo (setiembre se compara con
+    todo agosto, 31 días, no con los 30 días previos, que dejarían fuera el
+    01/08). Si no, la misma duración inmediatamente antes."""
+    if _es_mes_completo(fecha_inicio, fecha_fin):
+        fin = fecha_inicio - timedelta(days=1)
+        return fin.replace(day=1), fin
+    duracion_dias = (fecha_fin - fecha_inicio).days + 1
+    fin = fecha_inicio - timedelta(days=1)
+    return fin - timedelta(days=duracion_dias - 1), fin
 
 
 def _variacion_periodo(valor_actual, valor_anterior, mejor_si_sube=True):

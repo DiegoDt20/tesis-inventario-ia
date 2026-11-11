@@ -13,7 +13,7 @@ from django.shortcuts import render
 
 from ..models import Anomalia, Categoria, PedidoDetalle, Prediccion, Producto, Recomendacion
 from ..servicios.indicadores import calcular_coi, calcular_ei, calcular_ns
-from ._comunes import _origen_o_defecto, _variacion_periodo, resolver_rango_periodo
+from ._comunes import _origen_o_defecto, _variacion_periodo, periodo_anterior, resolver_rango_periodo
 from .anomalias import _anomalias_no_revisadas
 
 
@@ -300,12 +300,9 @@ def dashboard(request):
     ns = calcular_ns(fecha_inicio, fecha_fin, origen=origen)
     coi = calcular_coi(fecha_inicio, fecha_fin, origen=origen)
 
-    # Periodo anterior: misma duración, inmediatamente antes del rango
-    # mostrado, para poder decir "subió/bajó X% contra el periodo anterior"
-    # en las tarjetas de indicadores.
-    duracion_dias = (fecha_fin - fecha_inicio).days + 1
-    fecha_fin_anterior = fecha_inicio - timedelta(days=1)
-    fecha_inicio_anterior = fecha_fin_anterior - timedelta(days=duracion_dias - 1)
+    # Periodo anterior (ver periodo_anterior): el mes anterior completo si
+    # el rango es un mes calendario; si no, la misma duración justo antes.
+    fecha_inicio_anterior, fecha_fin_anterior = periodo_anterior(fecha_inicio, fecha_fin)
     ei_anterior = calcular_ei(fecha_inicio_anterior, fecha_fin_anterior, origen=origen)
     ns_anterior = calcular_ns(fecha_inicio_anterior, fecha_fin_anterior, origen=origen)
     coi_anterior = calcular_coi(fecha_inicio_anterior, fecha_fin_anterior, origen=origen)

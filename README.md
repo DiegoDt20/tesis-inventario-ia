@@ -420,6 +420,11 @@ con origen real:
   dashboard y reportes con `fecha_inicio`/`fecha_fin`, y
   `reporte_indicadores`), así que agosto y el mes del postest se miden por
   separado sin tocarse.
+- **El dashboard y reportes abren en el último mes con datos** (hoy el
+  postest, 01/09–30/09) y lo comparan con el mes anterior completo (el
+  pretest, 01/08–31/08), no con los 30 días previos. Antes abrían con todo
+  lo cargado y sumaban los dos periodos en un solo indicador (p. ej. EI
+  64,62 % = 336/520). Cualquier otro rango se elige con las fechas.
 - **El periodo de cada registro sale de sus propias fechas:** EI por
   `ConteoFisico.fecha_corte`, NS y PD por `Pedido.fecha_solicitud`, y CA
   por `periodo_mes` (el mes de la fecha de corte de `1_EI`). No hay un
@@ -1500,6 +1505,27 @@ mostraría en una sustentación), separada del dashboard operativo. Desde el
   ablación coinciden con `evaluacion_walkforward_20261004_041640.json` y
   `ablacion_20261004_051044.json`. Las tablas caben a 1280 y 1366 px de
   ancho sin desbordar.
+
+## Gráfico de predicción de demanda del dashboard
+
+Al cambiar de categoría en el selector, el gráfico podía quedar recortado:
+sin fechas en el eje X y con el eje Y empezando a media altura (30 de 60 en
+Látex). La primera carga se veía bien.
+
+- **No era la serie.** `/grafico-prediccion/` devuelve para esmalte, látex
+  y accesorio 90 puntos seguidos (03/07–30/09/2026): 60 días de histórico
+  con 0 en los días sin pedidos y 30 de pronóstico, sin `null` ni días
+  faltantes. `GraficoPrediccionSerieTests` lo verifica por categoría.
+- **Era el reemplazo por htmx.** htmx copia al `<canvas>` nuevo el
+  `style`/`width`/`height` del anterior y unos 20 ms después los quita. Si
+  Chart.js ya había dibujado, el lienzo se quedaba sin su alto (150 px en
+  vez de 300) y solo se veía la mitad superior. Dependía de qué llegaba
+  primero, por eso no pasaba siempre.
+- **Corrección** (`base.html`): `htmx-config` con
+  `attributesToSettle: ["class"]`, y el gráfico del lienzo que sale se
+  destruye en `htmx:beforeCleanupElement` (antes quedaba uno vivo por cada
+  cambio). El eje Y lleva `min: 0`. Vale también para los gráficos de
+  reportes, que se reemplazan igual al filtrar.
 
 ## Limitaciones
 

@@ -76,7 +76,10 @@ excedan ese rango.
                     // el tema claro/oscuro, sin duplicar lógica ni acumular
                     // charts huérfanos: siempre destruye el chart anterior
                     // atado a este <canvas> (si lo hay) antes de crear uno
-                    // nuevo, igual que al cambiar de categoría/producto.
+                    // nuevo. Al cambiar de categoría/producto el <canvas>
+                    // es otro (htmx reemplaza la tarjeta entera, con sus
+                    // etiquetas y escalas nuevas): el chart del lienzo viejo
+                    // lo destruye base.html en htmx:beforeCleanupElement.
                     function dibujar() {
                         const lienzo = document.getElementById('grafico-prediccion-demanda');
                         if (!lienzo) {
@@ -197,6 +200,9 @@ excedan ese rango.
                                 scales: {
                                     x: {grid: {display: false}, border: {display: false}, ticks: {maxTicksLimit: 8}},
                                     y: {
+                                        // min fijo, no solo beginAtZero: el
+                                        // eje arranca en 0 en cualquier serie.
+                                        min: 0,
                                         beginAtZero: true,
                                         border: {display: false},
                                         grid: {color: colorGrilla},

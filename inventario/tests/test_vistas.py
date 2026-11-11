@@ -257,3 +257,125 @@ class DashboardOrigenTests(TestCase):
         )
         self.assertEqual(len(_recomendaciones_urgentes()), 1)
         self.assertEqual(_salud_catalogo()['total'], 1)
+
+
+class PeriodoPorDefectoTests(TestCase):
+    """Sin fechas en la URL, el dashboard y reportes muestran el mes
+    calendario más reciente con datos (el postest), no la suma de todos los
+    periodos cargados, y lo comparan con el mes anterior completo."""
+
+    def setUp(self):
+        from django.utils import timezone
+        self.usuario = User.objects.create_superuser('admin_periodo', password='pass12345')
+        producto = Producto.objects.create(codigo='PIN-P1', nombre='Latex', precio_venta=10, costo_compra=5, origen='real')
+        # Agosto: 1 de 2 a tiempo (uno el 01/08, el día que 30 días hacia atrás
+        # desde el 01/09 dejarían fuera). Setiembre: 2 de 2.
+        for dia, a_tiempo in ((date(2026, 8, 1), False), (date(2026, 8, 20), True),
+                              (date(2026, 9, 5), True), (date(2026, 9, 25), True)):
+            pedido = Pedido.objects.create(
+                fecha_solicitud=timezone.make_aware(timezone.datetime(dia.year, dia.month, dia.day)),
+                cliente='C', origen='real',
+            )
+            PedidoDetalle.objects.create(
+                pedido=pedido, producto=producto, cantidad_solicitada=1, cantidad_atendida=1,
+                atendido_a_tiempo=a_tiempo,
+            )
+
+    def test_muestra_el_ultimo_mes_y_compara_con_el_mes_anterior_completo(self):
+        self.client.force_login(self.usuario)
+        for nombre in ('inventario:dashboard', 'inventario:reportes'):
+            respuesta = self.client.get(reverse(nombre))
+            self.assertEqual(respuesta.context['fecha_inicio'], date(2026, 9, 1))
+            self.assertEqual(respuesta.context['fecha_fin'], date(2026, 9, 30))
+            self.assertEqual(respuesta.context['ns']['valor'], 100.0)
+        # NS de agosto completo = 50 %: +100 % contra el periodo anterior.
+        self.assertEqual(respuesta.context['ns_anterior']['valor'], 50.0)
+
+    def test_con_fechas_en_la_url_se_respetan(self):
+        self.client.force_login(self.usuario)
+        respuesta = self.client.get(reverse('inventario:dashboard'), {'fecha_inicio': '2026-08-01', 'fecha_fin': '2026-09-30'})
+        self.assertEqual(respuesta.context['ns']['valor'], 75.0)
+
+    def test_periodo_anterior(self):
+        from ..views._comunes import periodo_anterior
+        self.assertEqual(periodo_anterior(date(2026, 9, 1), date(2026, 9, 30)), (date(2026, 8, 1), date(2026, 8, 31)))
+        self.assertEqual(periodo_anterior(date(2026, 3, 1), date(2026, 3, 31)), (date(2026, 2, 1), date(2026, 2, 28)))
+        self.assertEqual(periodo_anterior(date(2026, 9, 10), date(2026, 9, 19)), (date(2026, 8, 31), date(2026, 9, 9)))
+
+
+class GraficoPrediccionSerieTests(TestCase):
+    """El gráfico de predicción de demanda recibe, para cada categoría, un
+    punto por día sin huecos: los días sin pedidos van con 0 (nunca null ni
+    ausentes) y el pronóstico empieza el día siguiente al último real."""
+
+    def setUp(self):
+        import json
+        from datetime import timedelta
+        from django.utils import timezone
+        from ..models import ModeloEntrenado, Prediccion
+        self.json, self.timedelta = json, timedelta
+        self.usuario = User.objects.create_superuser('admin_grafico', password='pass12345')
+        modelo = ModeloEntrenado.objects.create(
+            fase=ModeloEntrenado.Fase.BASE, algoritmo='XGBRegressor', hiperparametros={},
+            mae=1.0, rmse=1.0, smape=0.1, r2=0.9, ruta_archivo='artefactos/modelos_ml/test.json',
+        )
+        lote = timezone.now()
+        # Cada categoría vende en días distintos y salteados de agosto: el
+        # resto de la ventana (incluidos los días previos al primer pedido)
+        # tiene que venir igual, en 0.
+        ventas = {'esmalte': (3, 4, 20), 'latex': (10, 31), 'accesorio': (15,)}
+        for categoria, dias in ventas.items():
+            producto = Producto.objects.create(
+                codigo=f'PIN-{categoria}', nombre=categoria, categoria=categoria,
+                precio_venta=10, costo_compra=5, origen='real',
+            )
+            for dia in dias:
+                pedido = Pedido.objects.create(
+                    fecha_solicitud=timezone.make_aware(timezone.datetime(2026, 8, dia)), cliente='C', origen='real',
+                )
+                PedidoDetalle.objects.create(pedido=pedido, producto=producto, cantidad_solicitada=7, cantidad_atendida=7)
+            for i in range(30):
+                Prediccion.objects.create(
+                    producto=producto, fecha_generacion=lote, fecha_objetivo=date(2026, 9, 1) + timedelta(days=i),
+                    demanda_predicha=2.5, modelo=modelo,
+                )
+        self.ventas = ventas
+
+    def test_cada_categoria_trae_un_punto_por_dia_sin_huecos(self):
+        self.client.force_login(self.usuario)
+        for categoria, dias in self.ventas.items():
+            respuesta = self.client.get(
+                reverse('inventario:dashboard_grafico_prediccion'), {'serie_grafico': f'categoria:{categoria}'},
+                headers={'HX-Request': 'true'},
+            )
+            self.assertEqual(respuesta.context['categoria_grafico'], categoria)
+            puntos = self.json.loads(respuesta.context['grafico_prediccion']['puntos_json'])
+            fechas = [date.fromisoformat(p['fecha']) for p in puntos]
+
+            # 60 días de histórico (el triple del horizonte, tope 60) + 30 de pronóstico.
+            self.assertEqual(len(puntos), 90, categoria)
+            self.assertEqual(fechas[0], date(2026, 7, 3))
+            self.assertEqual(fechas[-1], date(2026, 9, 30))
+            self.assertEqual(
+                fechas, [fechas[0] + self.timedelta(days=i) for i in range(len(fechas))],
+                f'{categoria}: la serie tiene días faltantes o repetidos',
+            )
+            for punto, fecha in zip(puntos, fechas):
+                if fecha <= date(2026, 8, 31):
+                    esperado = 7.0 if (fecha.month == 8 and fecha.day in dias) else 0.0
+                    self.assertEqual(punto['real'], esperado, f'{categoria} {fecha}')
+                    self.assertIsNone(punto['pronostico'])
+                else:
+                    self.assertIsNone(punto['real'])
+                    self.assertEqual(punto['pronostico'], 2.5)
+
+    def test_el_lienzo_no_hereda_tamano_ni_escala_al_cambiar_de_categoria(self):
+        """Contrato del cliente: htmx no debe "asentar" style/width/height
+        (le quitaba al <canvas> el tamaño fijado por Chart.js y el gráfico
+        quedaba recortado, sin eje X y con el eje Y a medias) y el eje Y
+        arranca en 0."""
+        self.client.force_login(self.usuario)
+        pagina = self.client.get(reverse('inventario:dashboard')).content.decode()
+        self.assertIn('''<meta name="htmx-config" content='{"attributesToSettle": ["class"]}'>''', pagina)
+        self.assertIn('htmx:beforeCleanupElement', pagina)
+        self.assertRegex(pagina, r'y: \{[^}]*min: 0,')
