@@ -192,6 +192,12 @@ indicadores.
   validación del encargado de la tienda).
   `comparar_fichas` (`inventario/servicios/correcciones_ficha.py`) arma la
   tabla de correcciones entre dos versiones de una ficha.
+- Postest cargado el 29/10/2026 (`datos/POSTTEST_TESIS_FINAL.xlsx`, origen
+  real, 01/09–30/09): EI 73,08 % (190/260), NS 70,00 % (182/260), COI
+  S/ 1 915,30 (CA 990,00 + PD 925,30). El dashboard y reportes abren en el
+  último mes con datos y lo comparan con el mes anterior completo
+  (`views/_comunes.py`: `resolver_rango_periodo`, `periodo_anterior`); antes
+  sumaban todo lo cargado.
 - Comando `reporte_indicadores --desde --hasta [--origen] [--detalle]
   [--guardar f.json] [--comparar f.json]`: EI/NS/COI de un periodo con el
   COI desglosado; `--comparar` falla si algún valor cambió. No escribe.
@@ -458,6 +464,15 @@ sigue fuera de alcance salvo que el usuario indique lo contrario.
   se usarán para filtrar por periodo (necesario para los reportes de los tres
   indicadores).
 - `LANGUAGE_CODE = 'es-pe'`, `TIME_ZONE = 'America/Lima'`.
+- Gráficos Chart.js en fragmentos que htmx reemplaza (dashboard,
+  reportes): `base.html` fija `htmx-config` con
+  `attributesToSettle: ["class"]` y destruye el chart del `<canvas>` que
+  sale en `htmx:beforeCleanupElement`. Sin lo primero, htmx le quita al
+  lienzo nuevo el `style`/`height` que Chart.js acaba de ponerle y el
+  gráfico queda recortado a 150 px (sin eje X, eje Y a medias) según el
+  orden de llegada; no quitar ninguno de los dos. La serie del gráfico de
+  predicción ya sale del servidor con un punto por día (0 en los días sin
+  pedidos).
 
 ## Convenciones de código
 
