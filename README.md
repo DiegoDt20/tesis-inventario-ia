@@ -1422,8 +1422,6 @@ distintos: esmalte ~270 u por ventana, accesorio ~54):
 Se verificaron los 33 puntos contra el reporte y contra los pedidos de la
 base. A mano: accesorio, del 15/08 al 21/08, real 10 + 18 + 18 = 46 u y
 pronóstico 71,2 u. Revisado a 1366×768, 1280×720 y 1100 px de ancho.
-Capturas en `docs/capturas/modelo_resumen_claro.png` y
-`modelo_resumen_oscuro.png`.
 
 La barra del detalle técnico es ahora una sección propia: ícono, título y
 descripción en dos renglones, y "Ver detalle" / "Ocultar detalle" con una
