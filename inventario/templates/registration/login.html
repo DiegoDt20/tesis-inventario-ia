@@ -20,7 +20,12 @@
         <div class="panel-login-formulario">
             <h1><i class="bi bi-box-arrow-in-right me-2"></i>Iniciar sesión</h1>
 
-            {% if form.errors %}
+            {% if form.bloqueado %}
+                <div class="alert alert-danger d-flex align-items-center gap-2 py-2">
+                    <i class="bi bi-lock-fill"></i>
+                    <div>{{ form.non_field_errors.0 }}</div>
+                </div>
+            {% elif form.errors %}
                 <div class="alert alert-danger d-flex align-items-center gap-2 py-2">
                     <i class="bi bi-x-circle-fill"></i>
                     <div>Usuario o contraseña incorrectos.</div>

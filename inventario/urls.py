@@ -1,7 +1,8 @@
 from django.urls import path
 
 from .views import (
-    anomalias, asistente, busqueda, conteos, dashboard, modelo, movimientos, pedidos, recomendaciones, reportes,
+    anomalias, asistente, busqueda, compras, conteos, dashboard, modelo, movimientos, pedidos, productos,
+    proveedores, recomendaciones, reportes,
 )
 
 app_name = 'inventario'
@@ -30,6 +31,20 @@ urlpatterns = [
         movimientos.movimiento_contexto_producto, name='movimiento_contexto_producto',
     ),
 
+    path('compras/', compras.compra_lista, name='compra_lista'),
+    path('compras/nueva/', compras.compra_nueva, name='compra_nueva'),
+    path('compras/<int:pk>/', compras.compra_detalle, name='compra_detalle'),
+    path('compras/<int:pk>/recibir/', compras.compra_recibir, name='compra_recibir'),
+    path('compras/<int:pk>/cerrar/', compras.compra_cerrar, name='compra_cerrar'),
+
+    path('productos/', productos.producto_lista, name='producto_lista'),
+    path('productos/nuevo/', productos.producto_nuevo, name='producto_nuevo'),
+    path('productos/<int:pk>/editar/', productos.producto_editar, name='producto_editar'),
+
+    path('proveedores/', proveedores.proveedor_lista, name='proveedor_lista'),
+    path('proveedores/nuevo/', proveedores.proveedor_nuevo, name='proveedor_nuevo'),
+    path('proveedores/<int:pk>/editar/', proveedores.proveedor_editar, name='proveedor_editar'),
+
     path('conteos/', conteos.conteo_lista, name='conteo_lista'),
     path('conteos/nuevo/', conteos.conteo_nuevo, name='conteo_nuevo'),
 
@@ -49,6 +64,7 @@ urlpatterns = [
     path('modelo/', modelo.modelo_detalle, name='modelo_detalle'),
 
     path('reportes/', reportes.reportes, name='reportes'),
+    path('reportes/comparacion/', reportes.comparacion, name='comparacion'),
 
     path('asistente/', asistente.asistente_chat, name='asistente_chat'),
     path('asistente/panel/', asistente.asistente_panel, name='asistente_panel'),

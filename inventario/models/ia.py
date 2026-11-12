@@ -275,6 +275,15 @@ class Recomendacion(models.Model):
         return self.unidades_sugeridas * self.producto.costo_compra
 
     @property
+    def linea_compra(self):
+        """Línea de compra vigente (de una compra no cancelada) que salió de
+        esta recomendación, o None si todavía no se pidió."""
+        for linea in self.compra_detalles.all():
+            if linea.compra.estado != 'cancelada':
+                return linea
+        return None
+
+    @property
     def es_punto_reorden(self):
         return self.metodo == self.Metodo.PUNTO_REORDEN
 

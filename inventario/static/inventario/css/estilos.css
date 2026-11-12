@@ -439,6 +439,12 @@ a {
     padding: 0.3rem 0.6rem;
 }
 
+/* El relleno compacto de arriba no deja sitio a la flecha del selector:
+   sin esto, la flecha tapa el final del texto elegido. */
+.form-select-sm {
+    padding-right: 2rem;
+}
+
 .form-control:focus, .form-select:focus {
     border-color: var(--acento);
     background-color: var(--superficie);
@@ -2480,4 +2486,36 @@ tr.htmx-swapping,
 
 .detalle-tecnico-contenido {
     padding-top: var(--espacio-4);
+}
+
+/* ------------------------------------------------------------------ */
+/* Impresión (y "guardar como PDF" del navegador): solo el contenido de la
+   pantalla, sin menú, barra superior, asistente ni controles. */
+/* ------------------------------------------------------------------ */
+
+@media print {
+    .sidebar,
+    .offcanvas,
+    .topbar,
+    .asistente-flotante,
+    .no-imprimir {
+        display: none !important;
+    }
+
+    .contenido-principal,
+    .contenido-principal.con-sidebar,
+    .contenido-principal.con-sidebar-colapsada {
+        margin-left: 0 !important;
+        width: 100% !important;
+    }
+
+    .card {
+        box-shadow: none;
+        break-inside: avoid;
+    }
+
+    .kpi-comparacion {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
 }

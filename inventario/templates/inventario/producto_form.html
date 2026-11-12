@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block titulo %}{% if producto %}Editar producto{% else %}Nuevo producto{% endif %}{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla">
+    <i class="bi bi-box-seam me-2"></i>{% if producto %}Editar {{ producto.codigo }}{% else %}Nuevo producto{% endif %}
+</h1>
+<p class="titulo-pantalla-detalle">
+    {% if producto %}
+        Stock actual: <strong>{{ producto.stock_actual }}</strong>. El stock no se edita aquí: cambia con
+        <a href="{% url 'inventario:movimiento_nuevo' %}">movimientos</a> y al recibir compras.
+    {% else %}
+        El producto empieza con stock 0; registra su existencia con un movimiento de ingreso o un conteo.
+    {% endif %}
+</p>
+
+<form method="post">
+    {% csrf_token %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                {% include 'inventario/_campos_form.html' %}
+            </div>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-grande"><i class="bi bi-check-lg me-1"></i>Guardar</button>
+    <a href="{% url 'inventario:producto_lista' %}" class="btn btn-outline-secondary"><i class="bi bi-x-lg me-1"></i>Cancelar</a>
+</form>
+{% endblock %}

@@ -139,6 +139,15 @@ Estas reglas son parte del diseño. Cambiarlas altera la validez de los indicado
    pip install -r requirements.txt
    ```
 
+   En un equipo sin GPU, `requirements.txt` descarga de más (trae las
+   bibliotecas de NVIDIA del entorno de desarrollo). Alternativa con solo
+   las dependencias directas:
+
+   ```bash
+   pip install torch --index-url https://download.pytorch.org/whl/cpu
+   pip install -r requirements-minimos.txt
+   ```
+
 2. Crear la base de datos en PostgreSQL con la extensión `pgvector`
    disponible en el servidor (`CREATE EXTENSION IF NOT EXISTS vector;` la
    ejecuta la migración `0013`, pero el paquete `pgvector` debe estar
@@ -175,6 +184,10 @@ ni se ponen credenciales directamente en `core/settings.py`.
 | `SECRET_KEY`           | Clave secreta de Django.                                                              | `changeme-generate-a-new-django-secret-key` |
 | `DEBUG`                | Modo debug de Django.                                                                 | `True`                               |
 | `ALLOWED_HOSTS`        | Hosts permitidos, separados por coma.                                                 | `localhost,127.0.0.1`                |
+| `CSRF_TRUSTED_ORIGINS` | Orígenes desde los que se aceptan formularios (el dominio del túnel, con `https://`). | `http://localhost,http://127.0.0.1`  |
+| `HTTPS_OBLIGATORIO`    | `True` al publicar el sistema fuera del equipo: cookies solo por HTTPS, confianza en `X-Forwarded-Proto` del proxy y HSTS. Ver [Publicar el sistema](#publicar-el-sistema). | `False` |
+| `LOGIN_MAX_INTENTOS`   | Intentos fallidos de inicio de sesión por usuario antes de bloquearlo.                | `5`                                  |
+| `LOGIN_BLOQUEO_MINUTOS`| Minutos que dura ese bloqueo.                                                         | `15`                                 |
 | `DB_NAME`              | Nombre de la base de datos PostgreSQL.                                                | `inventario_ia`                      |
 | `DB_USER`              | Usuario de PostgreSQL.                                                                | `diego`                              |
 | `DB_PASSWORD`          | Contraseña de PostgreSQL.                                                             | *(vacío por defecto)*                |
@@ -196,6 +209,9 @@ Todos se ejecutan con `python manage.py <comando>`.
 | `cargar_datos`           | Importa las fichas de registro (Excel, hojas `1_EI`, `2_NS`, `3_COI_CA`, `3_COI_PD`) a la base de datos. Cada línea no atendida congela el precio y el costo de su fila en `3_COI_PD`. Rechaza datos de un mes ya cargado del mismo origen y un `--limpiar` que borraría otro periodo. Reporta los indicadores solo del periodo cargado, con el COI desglosado. | `--archivo` (obligatorio), `--origen prueba\|real` (obligatorio), `--limpiar` (borra todo el origen; solo para recargar el mismo periodo), `--reemplazar-mes AAAA-MM` (sustituye solo ese mes del origen por una ficha corregida; ver [Pretest corregido](#pretest-corregido-29102026)), `--responsable` (del conteo físico; por defecto "Importación automática"), `--dry-run` |
 | `cargar_precios`         | Actualiza `precio_venta`, `costo_compra` y, si viene, `stock_minimo` de productos existentes. No crea productos ni cambia el precio congelado de una línea de pedido ya registrada (salvo las que siguen en 0, con `--completar-pedidos`). | `--archivo` (obligatorio), `--hoja`, `--completar-pedidos`, `--dry-run` |
 | `reporte_indicadores`    | EI, NS y COI de un periodo, con el COI desglosado (CA por concepto, PD con líneas, unidades y productos). Guarda una foto exacta de los valores en JSON o la compara con una anterior y falla si algo cambió. No escribe en la base. | `--desde`, `--hasta` (obligatorios, AAAA-MM-DD), `--origen` (`real`), `--detalle` (cada línea del PD), `--guardar ruta.json`, `--comparar ruta.json` |
+| `comparar_indicadores`   | Compara EI, NS y COI (con CA y PD) entre dos meses: valor de antes, de después, diferencia y variación relativa. Es la misma tabla de la pantalla "Pretest y postest". No escribe en la base. | `--antes`, `--despues` (AAAA-MM; por defecto los dos últimos meses con datos), `--origen` (`real`), `--excel ruta.xlsx` (resumen y detalle línea por línea) |
+| `respaldar_base`         | Respalda la base con `pg_dump` (formato propio, restaurable con `pg_restore`) en `artefactos/respaldos/` y comprueba que el archivo se puede leer. Sin etiqueta rota los respaldos automáticos (`auto_*.dump`); los etiquetados no se borran nunca solos. Ver [Respaldos](#respaldos). | `--etiqueta nombre`, `--conservar` (14), `--destino` |
+| `ciclo_diario`           | Corre en orden `predecir_demanda`, `generar_recomendaciones`, `detectar_anomalias` e `indexar_conocimiento` con el mismo origen. Si un paso falla, no corre los siguientes y dice cuáles quedaron sin ejecutar. Crea un lote nuevo de predicciones y recomendaciones. | `--origen` (`real`), `--dias` (30), `--sin-indexar` |
 | `clasificar_productos`   | Clasifica productos por categoría según palabras clave en el nombre.                                                | `--codigo`, `--categoria` (ambos opcionales; sin ellos reclasifica todos)     |
 | `configurar_lead_time`   | Asigna lead time (días) a productos.                                                                                 | `--dias` (obligatorio), `--codigo` (opcional; sin él, solo los que están en 0) |
 | `crear_grupos_permisos`  | Crea/actualiza los grupos "administrador" (acceso total) y "operador" (pedidos, movimientos y conteos, sin borrar). | —                                                                              |
@@ -534,6 +550,128 @@ python manage.py reporte_indicadores --desde 2026-08-01 --hasta 2026-08-31 \
 No usar `cargar_datos --limpiar` para deshacer el postest: borra todo el
 origen real (el comando ya lo rechaza si eso incluye agosto). Si la carga
 falla a mitad, la transacción se revierte sola y no hace falta restaurar.
+
+## Comparación pretest y postest
+
+La pantalla **Pretest y postest** (`/reportes/comparacion/`) pone los tres
+indicadores de dos meses lado a lado, con la diferencia (después − antes),
+la variación relativa y el desglose del COI de cada mes. Sin parámetros
+compara los dos últimos meses con datos. Los valores salen de las mismas
+funciones que el dashboard (`calcular_ei`, `calcular_ns`, `calcular_coi`).
+
+Resultado con los datos cargados (agosto contra setiembre de 2026):
+
+| Indicador | Antes | Después | Diferencia | Variación |
+|-----------|------:|--------:|-----------:|----------:|
+| EI        | 56,15 % (146 de 260) | 73,08 % (190 de 260) | +16,92 pp | +30,1 % |
+| NS        | 59,23 % (154 de 260) | 70,00 % (182 de 260) | +10,77 pp | +18,2 % |
+| COI       | S/ 5 341,40 | S/ 1 915,30 | −S/ 3 426,10 | −64,1 % |
+| CA        | S/ 1 050,00 | S/ 990,00   | −S/ 60,00    | −5,7 %  |
+| PD        | S/ 4 291,40 (90 líneas, 592 u.) | S/ 925,30 (78 líneas, 127 u.) | −S/ 3 366,10 | −78,4 % |
+
+La diferencia se calcula con los valores exactos: la de EI es 44/260 =
+16,92 pp, aunque restar los dos porcentajes ya redondeados dé 16,93.
+
+- **Excel**: botón "Descargar Excel" o `comparar_indicadores --excel
+  ruta.xlsx`. Hojas `Resumen`, `EI por producto`, `NS por línea`,
+  `COI - CA` y `COI - PD`, con los registros de los que sale cada valor.
+  No incluye el nombre del cliente.
+- **PDF**: botón "Imprimir o guardar PDF" (la hoja de impresión oculta el
+  menú y los controles).
+
+Es una comparación descriptiva: no incluye ninguna prueba de hipótesis.
+
+## Publicar el sistema
+
+Al abrir el sistema fuera del equipo (por ejemplo, con un túnel de
+Cloudflare), en `.env`:
+
+```
+DEBUG=False
+HTTPS_OBLIGATORIO=True
+ALLOWED_HOSTS=localhost,127.0.0.1,<dominio del túnel>
+CSRF_TRUSTED_ORIGINS=https://<dominio del túnel>
+```
+
+- Con `DEBUG=True`, cualquier error muestra a quien visite la página el
+  código, las rutas y parte de la configuración.
+- `HTTPS_OBLIGATORIO=True` deja las cookies de sesión y de CSRF solo por
+  HTTPS y envía HSTS. Django no redirige a HTTPS (lo hace el proxy).
+- Los archivos estáticos los sirve WhiteNoise, también con `DEBUG=False`.
+- El inicio de sesión se bloquea 15 minutos tras 5 intentos fallidos con
+  el mismo usuario (`LOGIN_MAX_INTENTOS`, `LOGIN_BLOQUEO_MINUTOS`). El
+  contador vive en la memoria del proceso: se reinicia con el servidor.
+
+## Catálogo y compras
+
+Además del panel de administración, el administrador tiene tres pantallas:
+
+- **Productos** (`/productos/`): buscar, crear y editar. El stock no se
+  edita aquí: cambia con movimientos y al recibir compras. El código no
+  se puede cambiar después de creado. Cambiar la categoría de un producto
+  mueve sus ventas a otra categoría del pronóstico y exige reentrenar.
+- **Proveedores** (`/proveedores/`).
+- **Compras** (`/compras/`): registrar lo pedido a un proveedor, registrar
+  la llegada (total o por partes) y cerrar la compra.
+
+Flujo de una compra:
+
+1. **Registrar**: proveedor, fecha y una línea por producto. El stock no
+   cambia todavía; lo pedido cuenta como *pedido en tránsito* y las
+   próximas recomendaciones lo descuentan.
+2. **Recibir**: en la compra, indicar cuántas unidades llegan de cada
+   línea y la fecha. Cada línea recibida genera un movimiento de ingreso
+   (origen real) que sube el stock. Cuando no falta nada, la compra queda
+   "recibida" y su fecha de llegada alimenta el lead time real del
+   producto.
+3. **Cerrar** (si el resto ya no va a llegar): sin nada recibido queda
+   "cancelada"; con una parte recibida queda "recibida" con lo que llegó
+   y lo que faltaba deja de contarse como pedido en tránsito.
+
+**De la recomendación a la compra**: en Recomendaciones, "Crear compra
+con las aceptadas" abre una compra con una línea por cada recomendación
+aceptada del último lote que todavía no se pidió (cantidad sugerida y
+costo de compra actual, editables). Se elige el proveedor, se quitan las
+líneas que no se vayan a pedir y se guarda. La tarjeta de la
+recomendación muestra luego "En la compra #N", y esa recomendación no se
+vuelve a ofrecer salvo que la compra se cancele.
+
+El grupo "operador" puede ver los productos, pero no crear ni editar
+productos, proveedores ni compras.
+
+## Integración continua
+
+`.github/workflows/tests.yml` corre en cada push a `main` y en cada pull
+request: levanta PostgreSQL con `pgvector`, instala
+`requirements-minimos.txt`, comprueba que no falten migraciones y ejecuta
+`python manage.py test inventario`. Las pruebas que necesitan las fichas
+reales de `datos/` (no versionadas) se saltan solas.
+
+## Respaldos
+
+`python manage.py respaldar_base` guarda la base completa en
+`artefactos/respaldos/auto_AAAAMMDD_HHMMSS.dump` y conserva los 14
+respaldos automáticos más recientes. Antes de un cambio delicado (cargar
+una ficha, reconstruir el catálogo), usar `--etiqueta antes_de_x`: ese
+respaldo queda fuera de la rotación.
+
+Restaurar reemplaza todo el contenido de la base:
+
+```
+pg_restore --clean --if-exists --no-owner --dbname inventario_ia artefactos/respaldos/<archivo>.dump
+```
+
+Para que corra solo cada día, un temporizador de systemd del usuario
+(`~/.config/systemd/user/respaldo-inventario.service` con
+`ExecStart=<proyecto>/venv/bin/python manage.py respaldar_base` y un
+`.timer` con `OnCalendar=daily` y `Persistent=true`, que recupera el
+respaldo si el equipo estaba apagado). `systemctl --user list-timers` lo
+muestra; `systemctl --user disable --now respaldo-inventario.timer` lo
+detiene.
+
+Los respaldos quedan en el mismo disco que la base: copiar la carpeta
+`artefactos/respaldos/` y `datos/` a otro lugar (USB, nube) de vez en
+cuando.
 
 ## Optimización del modelo de predicción
 

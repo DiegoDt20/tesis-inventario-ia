@@ -142,6 +142,13 @@ class CompraDetalle(models.Model):
     # Solo se llena si esta línea llegó en una fecha distinta a la fecha de
     # llegada general de la compra (Compra.fecha_llegada).
     fecha_llegada_linea = models.DateField(null=True, blank=True)
+    # Recomendación de reposición de la que salió esta línea, si la compra
+    # se armó desde las recomendaciones aceptadas. Sirve para no pedir dos
+    # veces lo mismo y para ver qué recomendaciones terminaron en compra.
+    recomendacion = models.ForeignKey(
+        'inventario.Recomendacion', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='compra_detalles',
+    )
 
     class Meta:
         verbose_name = 'Detalle de compra'
@@ -165,11 +172,13 @@ class CompraDetalle(models.Model):
         si no la de la compra completa."""
         return self.fecha_llegada_linea or self.compra.fecha_llegada
 
-    def save(self, *args, usuario=None, **kwargs):
+    def save(self, *args, usuario=None, origen=None, **kwargs):
         """Si cantidad_recibida aumenta respecto al valor guardado, genera
         automáticamente un Movimiento de tipo ingreso por la diferencia,
         para que el stock se actualice con la lógica que ya existe en
-        Movimiento (y no por fuera de ella escribiendo stock_actual)."""
+        Movimiento (y no por fuera de ella escribiendo stock_actual).
+        origen es el del movimiento generado (la pantalla de compras pasa
+        "real"); sin indicarlo queda el valor por defecto del modelo."""
         diferencia = self.cantidad_recibida - self._cantidad_recibida_original
         with transaction.atomic():
             super().save(*args, **kwargs)
@@ -187,6 +196,7 @@ class CompraDetalle(models.Model):
                     documento=f'Compra #{self.compra_id}',
                     motivo='Recepción de línea de compra',
                     usuario=usuario or _usuario_sistema_compras(),
+                    **({'origen': origen} if origen else {}),
                 )
         self._cantidad_recibida_original = self.cantidad_recibida
 

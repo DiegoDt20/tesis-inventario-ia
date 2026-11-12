@@ -3,12 +3,16 @@ por producto, motivos de pedidos no atendidos y comparación de los tres
 indicadores entre periodos. Uso analítico/de investigación, separado del
 dashboard operativo del día a día — ver views/dashboard.py."""
 import json
+from datetime import datetime
+from io import BytesIO
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Sum
+from django.http import HttpResponse
 from django.shortcuts import render
 
 from ..models import Categoria, PedidoDetalle, Producto
+from ..servicios.comparacion_periodos import comparar_periodos, libro_comparacion, meses_con_datos, rango_mes
 from ..servicios.indicadores import calcular_coi, calcular_ei, calcular_ns, serie_mensual
 from ._comunes import _origen_o_defecto, _variacion_periodo, periodo_anterior, resolver_rango_periodo
 
@@ -120,3 +124,53 @@ def reportes(request):
         else 'inventario/reportes.html'
     )
     return render(request, plantilla, contexto)
+
+
+def _parsear_mes(texto):
+    """'AAAA-MM' como date del día 1, o None si falta o no es un mes."""
+    try:
+        return datetime.strptime(texto or '', '%Y-%m').date()
+    except ValueError:
+        return None
+
+
+@login_required
+def comparacion(request):
+    """Los tres indicadores de dos meses lado a lado (el pretest contra el
+    postest), con la diferencia y el desglose del COI. Sin parámetros
+    compara los dos últimos meses con datos; ?antes=AAAA-MM&despues=AAAA-MM
+    elige otros y ?formato=xlsx descarga el mismo resultado en Excel, con
+    el detalle línea por línea."""
+    origen = _origen_o_defecto(request)
+    meses = meses_con_datos(origen)
+    mes_despues = _parsear_mes(request.GET.get('despues')) or (meses[-1] if meses else None)
+    mes_antes = _parsear_mes(request.GET.get('antes'))
+    if mes_antes is None:
+        # El mes con datos inmediatamente anterior al "después" elegido.
+        previos = [m for m in meses if mes_despues and m < mes_despues]
+        mes_antes = previos[-1] if previos else None
+
+    resultado = None
+    if mes_antes and mes_despues:
+        resultado = comparar_periodos(rango_mes(mes_antes), rango_mes(mes_despues), origen=origen)
+
+    if resultado and request.GET.get('formato') == 'xlsx':
+        salida = BytesIO()
+        libro_comparacion(resultado).save(salida)
+        respuesta = HttpResponse(
+            salida.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        nombre = f'comparacion_indicadores_{mes_antes:%Y-%m}_{mes_despues:%Y-%m}.xlsx'
+        respuesta['Content-Disposition'] = f'attachment; filename="{nombre}"'
+        return respuesta
+
+    return render(request, 'inventario/comparacion.html', {
+        'meses': meses,
+        'mes_antes': mes_antes,
+        'mes_despues': mes_despues,
+        'resultado': resultado,
+        'periodos': (
+            [('antes', resultado['antes']), ('después', resultado['despues'])] if resultado else []
+        ),
+    })

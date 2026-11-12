@@ -5,19 +5,62 @@ pensadas para el dueño de la microempresa, sin conocimientos técnicos: los
 formularios validan de más antes que de menos, y los mensajes de error se
 redactan en lenguaje sencillo.
 """
+import hashlib
 from datetime import date
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
 
-from .models import Movimiento, Pedido, PedidoDetalle, Producto
+from .models import Compra, Movimiento, Pedido, PedidoDetalle, Producto, Proveedor
 
 
 class LoginForm(AuthenticationForm):
+    """Inicio de sesión con bloqueo temporal: tras LOGIN_MAX_INTENTOS
+    intentos fallidos con el mismo nombre de usuario, ese usuario queda
+    bloqueado LOGIN_BLOQUEO_MINUTOS minutos (ni siquiera la contraseña
+    correcta entra), para frenar la prueba de contraseñas por fuerza bruta
+    cuando el sistema está publicado. Se cuenta por usuario y no por IP:
+    detrás del túnel todas las peticiones llegan desde la misma dirección.
+    Un ingreso correcto reinicia el contador."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.bloqueado = False
         for campo in self.fields.values():
             campo.widget.attrs.setdefault('class', 'form-control')
+
+    @staticmethod
+    def _clave_intentos(usuario):
+        # Hash: el nombre de usuario puede traer caracteres que una caché
+        # no acepta como clave.
+        return 'login-fallos:' + hashlib.sha256(usuario.strip().lower().encode()).hexdigest()
+
+    def clean(self):
+        clave = self._clave_intentos(self.cleaned_data.get('username') or '')
+        if cache.get(clave, 0) >= settings.LOGIN_MAX_INTENTOS:
+            self.bloqueado = True
+            raise ValidationError(
+                f'Demasiados intentos fallidos. Espera {settings.LOGIN_BLOQUEO_MINUTOS} minutos '
+                'y vuelve a intentarlo.',
+                code='bloqueado',
+            )
+        try:
+            datos = super().clean()
+        except ValidationError:
+            # add no pisa un contador existente: el plazo corre desde el
+            # primer fallo.
+            cache.add(clave, 0, settings.LOGIN_BLOQUEO_MINUTOS * 60)
+            try:
+                cache.incr(clave)
+            except ValueError:
+                # Venció entre add e incr.
+                cache.set(clave, 1, settings.LOGIN_BLOQUEO_MINUTOS * 60)
+            raise
+        cache.delete(clave)
+        return datos
 
 
 def resolver_producto(texto):
@@ -226,3 +269,155 @@ class MovimientoForm(forms.ModelForm):
         if producto is None:
             raise forms.ValidationError('Selecciona un producto de la lista (busca por código o nombre).')
         return producto
+
+
+def _estilo_bootstrap(form):
+    """Pone la clase de Bootstrap que corresponde a cada campo, para no
+    repetir widgets en cada ModelForm."""
+    for campo in form.fields.values():
+        widget = campo.widget
+        if isinstance(widget, forms.CheckboxInput):
+            clase = 'form-check-input'
+        elif isinstance(widget, forms.Select):
+            clase = 'form-select'
+        else:
+            clase = 'form-control'
+        widget.attrs.setdefault('class', clase)
+
+
+class ProductoForm(forms.ModelForm):
+    """Alta y edición de un producto del catálogo. No incluye el stock: el
+    stock solo cambia con movimientos (ingresos, salidas, ajustes) y con
+    la recepción de compras, para que siempre quede el rastro. El código
+    no se puede cambiar después de creado: es la llave con la que las
+    fichas de registro y los pedidos identifican al producto."""
+
+    class Meta:
+        model = Producto
+        fields = [
+            'codigo', 'nombre', 'presentacion', 'color', 'marca', 'categoria',
+            'precio_venta', 'costo_compra', 'stock_minimo', 'lead_time_dias', 'activo',
+        ]
+        labels = {
+            'codigo': 'Código',
+            'presentacion': 'Presentación',
+            'categoria': 'Categoría',
+            'precio_venta': 'Precio de venta (S/)',
+            'costo_compra': 'Costo de compra (S/)',
+            'stock_minimo': 'Stock mínimo',
+            'lead_time_dias': 'Lead time (días)',
+        }
+        help_texts = {
+            'categoria': 'El pronóstico de demanda se calcula por categoría: cambiarla mueve las ventas '
+                         'de este producto a otra categoría y exige volver a entrenar el modelo.',
+            'precio_venta': 'No cambia los pedidos ya registrados: cada línea conserva su precio.',
+            'lead_time_dias': 'Días que tarda el proveedor en entregar. Se usa en el stock de seguridad.',
+            'activo': 'Un producto inactivo no aparece en los buscadores ni recibe recomendaciones.',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _estilo_bootstrap(self)
+        if self.instance.pk:
+            self.fields['codigo'].disabled = True
+        for nombre in ('precio_venta', 'costo_compra'):
+            self.fields[nombre].min_value = 0
+            self.fields[nombre].widget.attrs['min'] = '0'
+        self.fields['stock_minimo'].widget.attrs['min'] = '0'
+
+    def clean_codigo(self):
+        return self.cleaned_data['codigo'].strip().upper()
+
+    def clean(self):
+        cleaned = super().clean()
+        for nombre in ('precio_venta', 'costo_compra', 'stock_minimo'):
+            valor = cleaned.get(nombre)
+            if valor is not None and valor < 0:
+                self.add_error(nombre, 'No puede ser negativo.')
+        precio, costo = cleaned.get('precio_venta'), cleaned.get('costo_compra')
+        if precio is not None and costo is not None and precio < costo:
+            self.add_error('precio_venta', 'El precio de venta es menor que el costo de compra.')
+        return cleaned
+
+
+class ProveedorForm(forms.ModelForm):
+    class Meta:
+        model = Proveedor
+        fields = ['nombre', 'contacto', 'telefono', 'lead_time_promedio']
+        labels = {
+            'contacto': 'Persona de contacto',
+            'telefono': 'Teléfono',
+            'lead_time_promedio': 'Lead time promedio (días)',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _estilo_bootstrap(self)
+        self.fields['lead_time_promedio'].widget.attrs['min'] = '0'
+
+    def clean_lead_time_promedio(self):
+        valor = self.cleaned_data['lead_time_promedio']
+        if valor < 0:
+            raise forms.ValidationError('No puede ser negativo.')
+        return valor
+
+
+class CompraForm(forms.ModelForm):
+    """Cabecera de una compra (las líneas van en LineaCompraFormSet)."""
+
+    class Meta:
+        model = Compra
+        fields = ['proveedor', 'fecha_pedido']
+        labels = {'fecha_pedido': 'Fecha del pedido al proveedor'}
+        widgets = {'fecha_pedido': forms.DateInput(attrs={'type': 'date'}, format='%Y-%m-%d')}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _estilo_bootstrap(self)
+        self.fields['proveedor'].empty_label = 'Elige un proveedor'
+        if not self.is_bound and not self.initial.get('fecha_pedido'):
+            self.initial['fecha_pedido'] = date.today()
+
+
+class LineaCompraForm(forms.Form):
+    """Una línea de la compra: producto, cantidad y costo unitario.
+    recomendacion es el id de la recomendación de la que salió la línea,
+    cuando la compra se arma desde las recomendaciones aceptadas."""
+    producto = forms.CharField(label='Producto', widget=forms.TextInput(attrs=ATRIBUTOS_BUSCADOR_PRODUCTO))
+    cantidad_pedida = forms.IntegerField(
+        label='Cantidad', min_value=1, widget=forms.NumberInput(attrs={'class': 'form-control', 'min': 1}),
+    )
+    costo_unitario = forms.DecimalField(
+        label='Costo unitario (S/)', min_value=0, max_digits=12, decimal_places=2,
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'min': 0, 'step': '0.01'}),
+    )
+    recomendacion = forms.IntegerField(required=False, widget=forms.HiddenInput())
+
+    def clean_producto(self):
+        producto = resolver_producto(self.cleaned_data['producto'])
+        if producto is None:
+            raise forms.ValidationError('Selecciona un producto de la lista (busca por código o nombre).')
+        return producto
+
+
+class _LineasCompraFormSet(forms.BaseFormSet):
+    def clean(self):
+        """Un mismo producto no puede ir en dos líneas de la misma compra:
+        se sumaría a mano y la recepción quedaría partida."""
+        if any(self.errors):
+            return
+        vistos = set()
+        for form in self.forms:
+            datos = form.cleaned_data
+            if not datos or datos.get('DELETE'):
+                continue
+            if datos['producto'].pk in vistos:
+                raise forms.ValidationError(
+                    f'El producto {datos["producto"].codigo} está en más de una línea: déjalo en una sola.'
+                )
+            vistos.add(datos['producto'].pk)
+
+
+LineaCompraFormSet = forms.formset_factory(
+    LineaCompraForm, formset=_LineasCompraFormSet, extra=1, can_delete=True,
+)

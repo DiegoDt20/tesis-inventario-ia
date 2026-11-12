@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% load inventario_extras %}
+
+{% block titulo %}Compra #{{ compra.pk }}{% endblock %}
+
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h1 class="titulo-pantalla">
+            <i class="bi bi-bag-check me-2"></i>Compra #{{ compra.pk }}
+            <span class="badge-suave badge-suave-{{ compra.estado|color_estado }}">
+                <i class="bi {{ compra.estado|icono_estado }}"></i> {{ compra.get_estado_display }}
+            </span>
+        </h1>
+        <p class="titulo-pantalla-detalle">
+            {{ compra.proveedor.nombre }} · pedida el {{ compra.fecha_pedido|date:'d/m/Y' }}
+            {% if compra.fecha_llegada %}
+                · llegó el {{ compra.fecha_llegada|date:'d/m/Y' }} ({{ compra.lead_time_real }} día{{ compra.lead_time_real|pluralize }})
+            {% endif %}
+            · total S/ {{ total|floatformat:2 }}
+        </p>
+    </div>
+    <a href="{% url 'inventario:compra_lista' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Compras</a>
+</div>
+
+{% with puede_recibir=perms.inventario.change_compra %}
+<form method="post" action="{% url 'inventario:compra_recibir' compra.pk %}">
+    {% csrf_token %}
+    <div class="card mb-3">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>Producto</th>
+                        <th class="text-end">Pedida</th>
+                        <th class="text-end">Recibida</th>
+                        <th class="text-end">Falta</th>
+                        <th class="text-end">Costo unit.</th>
+                        <th class="text-end">Subtotal</th>
+                        {% if compra.estado == 'pendiente' and puede_recibir %}<th class="text-end">Llega ahora</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for l in lineas %}
+                        <tr>
+                            <td>
+                                {{ l.producto.codigo }} — {{ l.producto.nombre }}
+                                {% if l.recomendacion_id %}
+                                    <span class="badge-suave badge-suave-secondary" title="Línea creada desde una recomendación aceptada">
+                                        <i class="bi bi-lightbulb"></i> Recomendación
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{ l.cantidad_pedida }}</td>
+                            <td class="text-end">{{ l.cantidad_recibida }}</td>
+                            <td class="text-end">{{ l.pendiente }}</td>
+                            <td class="text-end text-nowrap">S/ {{ l.costo_unitario|floatformat:2 }}</td>
+                            <td class="text-end text-nowrap">S/ {{ l.subtotal|floatformat:2 }}</td>
+                            {% if compra.estado == 'pendiente' and puede_recibir %}
+                                <td class="text-end" style="width: 8rem;">
+                                    {% if l.pendiente %}
+                                        <input type="number" name="recibir_{{ l.pk }}" value="{{ l.pendiente }}" min="0" max="{{ l.pendiente }}"
+                                               class="form-control form-control-sm text-end" aria-label="Unidades de {{ l.producto.codigo }} que llegan ahora">
+                                    {% else %}
+                                        <span class="text-muted small">Completa</span>
+                                    {% endif %}
+                                </td>
+                            {% endif %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if compra.estado == 'pendiente' and puede_recibir %}
+        <div class="d-flex flex-wrap align-items-end gap-3">
+            <div>
+                <label class="form-label small mb-0" for="fecha_llegada">Fecha de llegada</label>
+                <input type="date" id="fecha_llegada" name="fecha_llegada" value="{{ hoy|date:'Y-m-d' }}"
+                       min="{{ compra.fecha_pedido|date:'Y-m-d' }}" max="{{ hoy|date:'Y-m-d' }}" class="form-control form-control-sm">
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-box-arrow-in-down me-1"></i>Registrar llegada
+            </button>
+            <span class="text-muted small">Cada línea recibida suma al stock con un movimiento de ingreso.</span>
+        </div>
+    {% endif %}
+</form>
+
+{% if compra.estado == 'pendiente' and puede_recibir %}
+    <form method="post" action="{% url 'inventario:compra_cerrar' compra.pk %}" class="mt-4"
+          onsubmit="return confirm('{% if unidades_recibidas %}¿Cerrar la compra con lo recibido? Las {{ unidades_pendientes }} unidades que faltan ya no se esperarán.{% else %}¿Cancelar la compra? No se recibió nada.{% endif %}');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-danger btn-sm">
+            <i class="bi bi-x-circle me-1"></i>{% if unidades_recibidas %}Cerrar con lo recibido{% else %}Cancelar compra{% endif %}
+        </button>
+    </form>
+{% endif %}
+{% endwith %}
+{% endblock %}

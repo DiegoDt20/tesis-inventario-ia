@@ -33,6 +33,31 @@ CSRF_TRUSTED_ORIGINS = config(
     cast=Csv()
 )
 
+# Publicación por HTTPS (túnel de Cloudflare u otro proxy)
+# -------------------------------------------------------
+# Con HTTPS_OBLIGATORIO=True las cookies de sesión y de CSRF solo viajan
+# por HTTPS, Django confía en la cabecera X-Forwarded-Proto del proxy para
+# saber que la petición llegó cifrada y se envía HSTS. False por defecto
+# para no romper el uso local por http://localhost; activarlo siempre que
+# el sistema se abra fuera del equipo. No se fuerza la redirección a HTTPS
+# desde Django (la hace el proxy): así el acceso local sigue funcionando.
+HTTPS_OBLIGATORIO = config('HTTPS_OBLIGATORIO', default=False, cast=bool)
+if HTTPS_OBLIGATORIO:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=2592000, cast=int)  # 30 días
+SESSION_COOKIE_HTTPONLY = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+
+# Bloqueo del inicio de sesión tras varios intentos fallidos con el mismo
+# usuario (inventario/forms.py: LoginForm). El contador vive en la caché de
+# Django (en memoria del proceso por defecto: se reinicia al reiniciar el
+# servidor y, con varios procesos, cada uno lleva el suyo).
+LOGIN_MAX_INTENTOS = config('LOGIN_MAX_INTENTOS', default=5, cast=int)
+LOGIN_BLOQUEO_MINUTOS = config('LOGIN_BLOQUEO_MINUTOS', default=15, cast=int)
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -47,6 +72,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Sirve los archivos estáticos también con DEBUG=False (runserver solo
+    # los sirve en modo depuración). Debe ir justo después de SecurityMiddleware.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -126,6 +154,13 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+# WhiteNoise avisa en cada arranque si la carpeta no existe.
+STATIC_ROOT.mkdir(exist_ok=True)
+# WhiteNoise busca los estáticos en las apps igual que runserver, así que
+# la interfaz no pierde los estilos con DEBUG=False aunque no se haya
+# corrido "collectstatic".
+WHITENOISE_USE_FINDERS = True
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

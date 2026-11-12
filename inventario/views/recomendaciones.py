@@ -79,7 +79,8 @@ def recomendaciones_lista(request):
         )
         lote = Recomendacion.objects.filter(fecha_generacion=ultima_fecha_generacion)
         qs = (
-            lote.select_related('producto').annotate(orden_urgencia=orden_urgencia)
+            lote.select_related('producto').prefetch_related('compra_detalles__compra')
+            .annotate(orden_urgencia=orden_urgencia)
             .order_by('orden_urgencia', '-cantidad_sugerida')
         )
         pagina = Paginator(qs, 25).get_page(request.GET.get('page'))

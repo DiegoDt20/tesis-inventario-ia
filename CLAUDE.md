@@ -201,6 +201,16 @@ indicadores.
 - Comando `reporte_indicadores --desde --hasta [--origen] [--detalle]
   [--guardar f.json] [--comparar f.json]`: EI/NS/COI de un periodo con el
   COI desglosado; `--comparar` falla si algún valor cambió. No escribe.
+- Comparación pretest/postest (`servicios/comparacion_periodos.py`):
+  pantalla `/reportes/comparacion/` ("Pretest y postest" en el menú;
+  `?antes=AAAA-MM&despues=AAAA-MM`, por defecto los dos últimos meses con
+  datos; `?formato=xlsx` descarga el Excel) y comando `comparar_indicadores
+  [--antes] [--despues] [--origen] [--excel ruta]`. No recalcula nada:
+  usa `calcular_ei/ns/coi`. Diferencia = después − antes, exacta (EI
+  +16,92 pp: 44/260; restar los porcentajes ya redondeados da 16,93). El
+  Excel trae el resumen y el detalle (EI por producto, NS por línea, CA,
+  PD), sin nombre de cliente. PDF = imprimir desde el navegador (`@media
+  print` en `estilos.css`, clase `no-imprimir`).
 - Comando `cargar_precios --archivo precios.xlsx [--hoja nombre]
   [--completar-pedidos] [--dry-run]`
   (`inventario/management/commands/cargar_precios.py`): actualiza
@@ -379,6 +389,11 @@ ajuste posterior con los datos reales/de prueba de la microempresa.
 - Los archivos de modelo entrenado (`.json` de XGBoost) se guardan en
   `artefactos/modelos_ml/`, que no se versiona (`.gitignore`).
 - Dependencias añadidas: `pandas`, `numpy`, `scikit-learn`, `xgboost`.
+- `requirements.txt` es la foto completa del entorno (con las bibliotecas
+  de GPU que instala PyTorch); `requirements-minimos.txt` lista solo las
+  dependencias directas, para equipos sin GPU y para el CI
+  (`.github/workflows/tests.yml`: PostgreSQL con pgvector, `makemigrations
+  --check` y la suite). Al agregar una dependencia, ponerla en ambos.
 
 ### Etapa 3 — motor de decisiones, detección de anomalías y asistente conversacional (implementados)
 
@@ -455,6 +470,62 @@ Ya no están fuera de alcance: los tres están implementados y en uso.
 
 Frontend (más allá de las plantillas Django + Bootstrap ya implementadas)
 sigue fuera de alcance salvo que el usuario indique lo contrario.
+
+## Catálogo y compras desde la interfaz
+
+- Productos (`views/productos.py`, `/productos/`): listado con búsqueda,
+  alta y edición con `ProductoForm`. El stock NO es un campo del
+  formulario (solo cambia con `Movimiento` y recepción de compras); el
+  código no se puede cambiar tras crear; lo creado desde pantalla queda
+  `origen=real`. Cambiar la categoría mueve ventas entre categorías del
+  pronóstico (exige reentrenar): el formulario lo advierte.
+- Proveedores (`views/proveedores.py`, `/proveedores/`).
+- Compras (`views/compras.py`, `/compras/`): registrar (cabecera +
+  `LineaCompraFormSet`, un producto por línea), recibir y cerrar.
+  `compra_recibir` suma a `cantidad_recibida` y `CompraDetalle.save(
+  usuario=, origen='real')` genera el ingreso; la compra pasa a
+  "recibida" cuando no falta nada. `compra_cerrar`: sin nada recibido →
+  "cancelada"; con una parte → "recibida", baja `cantidad_pedida` a lo
+  recibido y borra las líneas sin recepción, para que lo que faltaba deje
+  de contar como pedido en tránsito (`motor._pedidos_en_transito` =
+  pedida − recibida de toda compra no cancelada).
+- Recomendación → compra: `CompraDetalle.recomendacion` (FK opcional,
+  migración 0031). `/compras/nueva/?desde=recomendaciones` precarga las
+  aceptadas del último lote con unidades sugeridas > 0 y sin línea en una
+  compra no cancelada (`compras.recomendaciones_por_pedir`); la tarjeta
+  muestra "En la compra #N" (`Recomendacion.linea_compra`). `Producto` no
+  tiene proveedor: se elige al armar la compra.
+- Permisos: los de Django por modelo (`view/add/change_producto`,
+  `_proveedor`, `_compra`). El grupo "operador" solo ve productos; no
+  entra a proveedores ni compras (no se cambió `PERMISOS_OPERADOR`).
+
+## Publicación y seguridad
+
+- `HTTPS_OBLIGATORIO=True` en `.env` al abrir el sistema fuera del equipo
+  (túnel de Cloudflare): cookies de sesión/CSRF solo por HTTPS,
+  `SECURE_PROXY_SSL_HEADER` y HSTS. `False` por defecto para el uso local.
+  Publicar siempre con `DEBUG=False`.
+- `LoginForm` bloquea un usuario `LOGIN_BLOQUEO_MINUTOS` (15) tras
+  `LOGIN_MAX_INTENTOS` (5) fallos; cuenta por usuario (detrás del túnel
+  todas las peticiones llegan de la misma IP), en la caché de Django.
+- WhiteNoise sirve los estáticos con `DEBUG=False`
+  (`WHITENOISE_USE_FINDERS`, no exige `collectstatic`).
+- `.gitignore` excluye `.env.*` (salvo `.env.example`) y `*.deb`.
+
+## Mantenimiento
+
+- `respaldar_base [--etiqueta nombre] [--conservar 14] [--destino]`:
+  `pg_dump` en formato propio a `artefactos/respaldos/`, verificado con
+  `pg_restore --list`. Sin etiqueta se llama `auto_AAAAMMDD_HHMMSS.dump`
+  y rota (solo los `auto_`); con etiqueta
+  (`respaldo_<etiqueta>_...`) nunca se borra solo. En el equipo de
+  desarrollo lo corre a diario un temporizador de systemd del usuario
+  (`~/.config/systemd/user/respaldo-inventario.timer`, fuera del repo).
+- `ciclo_diario [--origen real] [--dias 30] [--sin-indexar]`: corre en
+  orden `predecir_demanda`, `generar_recomendaciones`,
+  `detectar_anomalias` e `indexar_conocimiento` con el mismo origen; si
+  un paso falla no corre los siguientes. Crea un lote nuevo de
+  predicciones y recomendaciones: no está programado, se corre a mano.
 
 ## Convenciones a mantener
 

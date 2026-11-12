@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% load inventario_extras %}
+
+{% block titulo %}Compras{% endblock %}
+
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h1 class="titulo-pantalla"><i class="bi bi-bag-check me-2"></i>Compras</h1>
+        <p class="titulo-pantalla-detalle">Pedidos a proveedores. Lo pendiente de llegar se descuenta de las próximas recomendaciones.</p>
+    </div>
+    {% if perms.inventario.add_compra %}
+        <div class="d-flex gap-2">
+            {% if por_pedir %}
+                <a href="{% url 'inventario:compra_nueva' %}?desde=recomendaciones" class="btn btn-acento">
+                    <i class="bi bi-lightbulb me-1"></i>Comprar lo aceptado ({{ por_pedir }})
+                </a>
+            {% endif %}
+            <a href="{% url 'inventario:compra_nueva' %}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Nueva compra</a>
+        </div>
+    {% endif %}
+</div>
+
+<form class="row g-2 align-items-end mb-3" method="get">
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="estado">Estado</label>
+        <select id="estado" name="estado" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">Todos</option>
+            {% for valor, etiqueta in estados %}
+                <option value="{{ valor }}" {% if estado == valor %}selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</form>
+
+{% if pagina.object_list %}
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>N.°</th>
+                        <th>Fecha del pedido</th>
+                        <th>Proveedor</th>
+                        <th class="text-end">Líneas</th>
+                        <th class="text-end">Recibido</th>
+                        <th class="text-end">Monto</th>
+                        <th>Llegada</th>
+                        <th>Estado</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in pagina %}
+                        <tr>
+                            <td>{{ c.pk }}</td>
+                            <td>{{ c.fecha_pedido|date:'d/m/Y' }}</td>
+                            <td>{{ c.proveedor.nombre }}</td>
+                            <td class="text-end">{{ c.lineas }}</td>
+                            <td class="text-end text-nowrap">{{ c.unidades_recibidas|default:0 }} de {{ c.unidades_pedidas|default:0 }} u.</td>
+                            <td class="text-end text-nowrap">S/ {{ c.monto|default:0|floatformat:2 }}</td>
+                            <td>{{ c.fecha_llegada|date:'d/m/Y'|default:'—' }}</td>
+                            <td>
+                                <span class="badge-suave badge-suave-{{ c.estado|color_estado }}">
+                                    <i class="bi {{ c.estado|icono_estado }}"></i> {{ c.get_estado_display }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{% url 'inventario:compra_detalle' c.pk %}" class="btn btn-outline-secondary btn-sm">
+                                    {% if c.estado == 'pendiente' %}Recibir{% else %}Ver{% endif %}
+                                </a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include 'inventario/_paginacion.html' %}
+{% else %}
+    <div class="card"><div class="estado-vacio"><i class="bi bi-bag-check estado-vacio-icono"></i>No hay compras registradas{% if estado %} con ese estado{% endif %}.</div></div>
+{% endif %}
+{% endblock %}

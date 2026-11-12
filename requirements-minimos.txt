@@ -1,0 +1,30 @@
+# Dependencias directas del sistema, con la versión con que se desarrolló.
+# pip resuelve el resto según el equipo. requirements.txt es la foto
+# completa del entorno de desarrollo (incluye las bibliotecas de GPU de
+# NVIDIA que PyTorch instala en Linux): usar este archivo en un equipo sin
+# GPU, instalando antes PyTorch solo para CPU:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-minimos.txt
+
+# Web y base de datos
+Django==5.2.17
+python-decouple==3.8
+psycopg2-binary==2.9.12
+pgvector==0.5.0
+whitenoise==6.12.0
+
+# Importación y exportación de Excel
+openpyxl==3.1.5
+
+# Motor de predicción y detección de anomalías
+numpy==2.5.3
+pandas==3.0.5
+scipy==1.18.1
+scikit-learn==1.9.1
+xgboost==3.4.1
+
+# Asistente conversacional
+sentence-transformers==6.1.0
+anthropic==1.8.0
+requests==2.34.2

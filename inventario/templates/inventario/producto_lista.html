@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% load inventario_extras %}
+
+{% block titulo %}Productos{% endblock %}
+
+{% block contenido %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h1 class="titulo-pantalla"><i class="bi bi-box-seam me-2"></i>Productos</h1>
+        <p class="titulo-pantalla-detalle">Catálogo de la tienda: {{ total }} producto{{ total|pluralize }} con este filtro.</p>
+    </div>
+    {% if perms.inventario.add_producto %}
+        <a href="{% url 'inventario:producto_nuevo' %}" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Nuevo producto
+        </a>
+    {% endif %}
+</div>
+
+<form class="row g-2 align-items-end mb-3" method="get">
+    <div class="col-md-4">
+        <label class="form-label small mb-0" for="q">Código o nombre</label>
+        <input type="search" id="q" name="q" value="{{ q }}" class="form-control form-control-sm">
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="categoria">Categoría</label>
+        <select id="categoria" name="categoria" class="form-select form-select-sm">
+            <option value="">Todas</option>
+            {% for valor, etiqueta in categorias %}
+                <option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small mb-0" for="estado">Estado</label>
+        <select id="estado" name="estado" class="form-select form-select-sm">
+            <option value="activos" {% if estado == 'activos' %}selected{% endif %}>Activos</option>
+            <option value="inactivos" {% if estado == 'inactivos' %}selected{% endif %}>Inactivos</option>
+            <option value="todos" {% if estado == 'todos' %}selected{% endif %}>Todos</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Filtrar</button>
+        <a href="{% url 'inventario:producto_lista' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg me-1"></i>Limpiar</a>
+    </div>
+</form>
+
+{% if pagina.object_list %}
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover table-striped align-middle mb-0 tabla-compacta">
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Producto</th>
+                        <th>Categoría</th>
+                        <th class="text-end">Stock</th>
+                        <th class="text-end">Mínimo</th>
+                        <th class="text-end">Precio</th>
+                        <th class="text-end">Costo</th>
+                        <th class="text-end">Lead time</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in pagina %}
+                        <tr>
+                            <td class="text-nowrap">{{ p.codigo }}</td>
+                            <td>
+                                {{ p.nombre }}
+                                <span class="text-muted small">{{ p.presentacion }} {{ p.color }}</span>
+                                {% if not p.activo %}
+                                    <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Inactivo</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ p.get_categoria_display }}</td>
+                            <td class="text-end {% if p.activo and p.stock_actual <= p.stock_minimo %}text-danger fw-semibold{% endif %}">{{ p.stock_actual }}</td>
+                            <td class="text-end">{{ p.stock_minimo }}</td>
+                            <td class="text-end text-nowrap">S/ {{ p.precio_venta|floatformat:2 }}</td>
+                            <td class="text-end text-nowrap">S/ {{ p.costo_compra|floatformat:2 }}</td>
+                            <td class="text-end text-nowrap">{{ p.lead_time_dias }} d</td>
+                            <td class="text-end">
+                                {% if perms.inventario.change_producto %}
+                                    <a href="{% url 'inventario:producto_editar' p.pk %}" class="btn btn-outline-secondary btn-sm" title="Editar {{ p.codigo }}">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include 'inventario/_paginacion.html' %}
+{% else %}
+    <div class="card"><div class="estado-vacio"><i class="bi bi-box-seam estado-vacio-icono"></i>No hay productos con ese filtro.</div></div>
+{% endif %}
+{% endblock %}

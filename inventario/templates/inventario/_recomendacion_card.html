@@ -9,6 +9,13 @@
             {% include 'inventario/_recomendacion_metodo.html' %}
             {% if r.aceptada is True %}
                 <span class="badge-suave badge-suave-success"><i class="bi bi-check-circle-fill"></i> Aceptada</span>
+                {% with linea=r.linea_compra %}
+                    {% if linea %}
+                        <a class="badge-suave badge-suave-secondary text-decoration-none" href="{% url 'inventario:compra_detalle' linea.compra_id %}">
+                            <i class="bi bi-bag-check"></i> En la compra #{{ linea.compra_id }}
+                        </a>
+                    {% endif %}
+                {% endwith %}
             {% elif r.aceptada is False %}
                 <span class="badge-suave badge-suave-secondary"><i class="bi bi-dash-circle-fill"></i> Rechazada</span>
             {% endif %}

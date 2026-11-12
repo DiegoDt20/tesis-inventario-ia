@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+
+{% block titulo %}{% if proveedor %}Editar proveedor{% else %}Nuevo proveedor{% endif %}{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla">
+    <i class="bi bi-truck me-2"></i>{% if proveedor %}Editar {{ proveedor.nombre }}{% else %}Nuevo proveedor{% endif %}
+</h1>
+
+<form method="post" class="mt-3">
+    {% csrf_token %}
+    <input type="hidden" name="siguiente" value="{{ siguiente }}">
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                {% include 'inventario/_campos_form.html' with columna='col-md-6' %}
+            </div>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-grande"><i class="bi bi-check-lg me-1"></i>Guardar</button>
+    <a href="{% url 'inventario:proveedor_lista' %}" class="btn btn-outline-secondary"><i class="bi bi-x-lg me-1"></i>Cancelar</a>
+</form>
+{% endblock %}

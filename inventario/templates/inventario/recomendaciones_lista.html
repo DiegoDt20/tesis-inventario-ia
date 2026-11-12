@@ -51,6 +51,15 @@
     </div>
 {% endif %}
 
+{% if perms.inventario.add_compra %}
+    <p class="small mb-3">
+        <a href="{% url 'inventario:compra_nueva' %}?desde=recomendaciones" class="btn btn-acento btn-sm">
+            <i class="bi bi-bag-plus me-1"></i>Crear compra con las aceptadas
+        </a>
+        <span class="text-muted ms-2">Arma la orden con las recomendaciones aceptadas que todavía no se pidieron.</span>
+    </p>
+{% endif %}
+
 <div id="zona-resultados-recomendaciones" class="zona-resultados">
     {% include 'inventario/_recomendaciones_lista_resultados.html' %}
 </div>

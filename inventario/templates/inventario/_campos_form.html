@@ -1,0 +1,19 @@
+{# Campos de un formulario en rejilla: etiqueta, control, ayuda y errores. #}
+{% for campo in form.visible_fields %}
+    <div class="{{ columna|default:'col-md-4' }}">
+        {% if campo.field.widget.input_type == 'checkbox' %}
+            <div class="form-check mt-md-4">
+                {{ campo }}
+                <label class="form-check-label" for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+            </div>
+        {% else %}
+            <label class="form-label" for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+            {{ campo }}
+        {% endif %}
+        {% if campo.help_text %}<div class="form-text">{{ campo.help_text }}</div>{% endif %}
+        {% for error in campo.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+    </div>
+{% endfor %}
+{% for error in form.non_field_errors %}
+    <div class="col-12 text-danger small">{{ error }}</div>
+{% endfor %}

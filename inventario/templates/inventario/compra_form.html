@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+
+{% block titulo %}Nueva compra{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-bag-plus me-2"></i>Registrar compra</h1>
+<p class="titulo-pantalla-detalle">
+    {% if desde_recomendaciones %}
+        Líneas tomadas de las recomendaciones aceptadas: ajusta cantidades y costos, o marca "Quitar" en las que no vayas a pedir.
+    {% else %}
+        Lo que se le pide al proveedor. El stock sube recién cuando se registra la llegada.
+    {% endif %}
+</p>
+
+{% if not hay_proveedores %}
+    <div class="alert alert-warning d-flex align-items-center gap-2">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <div>
+            Todavía no hay proveedores.
+            <a href="{% url 'inventario:proveedor_nuevo' %}?siguiente=compra">Registra uno</a> antes de crear la compra.
+        </div>
+    </div>
+{% endif %}
+
+{% include 'inventario/_lista_productos.html' %}
+
+<form method="post">
+    {% csrf_token %}
+    {{ formset.management_form }}
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h6 class="card-title"><i class="bi bi-truck me-1"></i> Datos de la compra</h6>
+            <div class="row g-3">
+                {% include 'inventario/_campos_form.html' with columna='col-md-5' %}
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h6 class="card-title"><i class="bi bi-list-ul me-1"></i> Líneas de la compra</h6>
+            {% for error in formset.non_form_errors %}
+                <div class="alert alert-danger py-2 d-flex align-items-center gap-2">
+                    <i class="bi bi-x-circle-fill"></i>{{ error }}
+                </div>
+            {% endfor %}
+            {% for linea in formset %}
+                <div class="row g-2 align-items-start border-bottom pb-2 mb-2">
+                    {{ linea.recomendacion }}
+                    <div class="col-md-6">
+                        {% if forloop.first %}<label class="form-label small mb-1">Producto</label>{% endif %}
+                        {{ linea.producto }}
+                        {% for error in linea.producto.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1">Cantidad</label>{% endif %}
+                        {{ linea.cantidad_pedida }}
+                        {% for error in linea.cantidad_pedida.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1">Costo unitario (S/)</label>{% endif %}
+                        {{ linea.costo_unitario }}
+                        {% for error in linea.costo_unitario.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="col-md-2">
+                        {% if forloop.first %}<label class="form-label small mb-1 d-block">&nbsp;</label>{% endif %}
+                        <div class="form-check mt-1">
+                            {{ linea.DELETE }}
+                            <label class="form-check-label small" for="{{ linea.DELETE.id_for_label }}">Quitar</label>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+            <button type="submit" name="agregar_linea" value="1" class="btn btn-outline-secondary btn-sm mt-2" formnovalidate>
+                <i class="bi bi-plus-lg me-1"></i>Agregar otra línea
+            </button>
+        </div>
+    </div>
+
+    <button type="submit" name="guardar" value="1" class="btn btn-primary btn-grande" {% if not hay_proveedores %}disabled{% endif %}>
+        <i class="bi bi-check-lg me-1"></i>Guardar compra
+    </button>
+    <a href="{% url 'inventario:compra_lista' %}" class="btn btn-outline-secondary"><i class="bi bi-x-lg me-1"></i>Cancelar</a>
+</form>
+{% endblock %}

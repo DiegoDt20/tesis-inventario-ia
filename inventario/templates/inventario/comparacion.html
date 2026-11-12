@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% load inventario_extras l10n %}
+
+{% block titulo %}Pretest y postest{% endblock %}
+
+{% block contenido %}
+<h1 class="titulo-pantalla"><i class="bi bi-clipboard-data me-2"></i>Pretest y postest</h1>
+<p class="titulo-pantalla-detalle">
+    Los tres indicadores de la investigación en dos meses, lado a lado.
+</p>
+
+{% if not meses %}
+    <div class="alert alert-info">Todavía no hay datos cargados para comparar.</div>
+{% else %}
+    <form method="get" class="d-flex flex-wrap align-items-end gap-3 mb-4 no-imprimir">
+        <div>
+            <label class="form-label small mb-0" for="antes">Antes (pretest)</label>
+            <select id="antes" name="antes" class="form-select form-select-sm">
+                {% for m in meses %}
+                    <option value="{{ m|date:'Y-m' }}" {% if m == mes_antes %}selected{% endif %}>{{ m|date:'F Y'|capfirst }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="form-label small mb-0" for="despues">Después (postest)</label>
+            <select id="despues" name="despues" class="form-select form-select-sm">
+                {% for m in meses %}
+                    <option value="{{ m|date:'Y-m' }}" {% if m == mes_despues %}selected{% endif %}>{{ m|date:'F Y'|capfirst }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-arrow-repeat me-1"></i>Comparar</button>
+        {% if resultado %}
+            <div class="ms-auto d-flex gap-2">
+                <a class="btn btn-outline-secondary btn-sm"
+                   href="?antes={{ mes_antes|date:'Y-m' }}&despues={{ mes_despues|date:'Y-m' }}&formato=xlsx">
+                    <i class="bi bi-file-earmark-excel me-1"></i>Descargar Excel
+                </a>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+                    <i class="bi bi-printer me-1"></i>Imprimir o guardar PDF
+                </button>
+            </div>
+        {% endif %}
+    </form>
+
+    {% if not resultado %}
+        <div class="alert alert-info">
+            Hace falta un mes anterior con datos para comparar. Hoy solo hay
+            {{ meses|length }} mes{{ meses|length|pluralize:"es" }} cargado{{ meses|length|pluralize }}.
+        </div>
+    {% else %}
+        {% with a=resultado.antes d=resultado.despues %}
+        <div class="card mb-4">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-arrow-left-right me-1"></i> Indicadores</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0 tabla-compacta" id="tabla-comparacion">
+                        <thead>
+                            <tr>
+                                <th>Indicador</th>
+                                <th class="text-end">
+                                    Antes
+                                    <div class="small fw-normal text-muted">{{ a.inicio|date:'d/m/Y' }} – {{ a.fin|date:'d/m/Y' }}</div>
+                                </th>
+                                <th class="text-end">
+                                    Después
+                                    <div class="small fw-normal text-muted">{{ d.inicio|date:'d/m/Y' }} – {{ d.fin|date:'d/m/Y' }}</div>
+                                </th>
+                                <th class="text-end">Diferencia</th>
+                                <th class="text-end">Variación</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for f in resultado.filas %}
+                                <tr {% if f.secundaria %}class="small text-muted"{% endif %}>
+                                    <td {% if f.secundaria %}class="ps-4"{% endif %}>
+                                        {% if not f.secundaria %}<span class="muestra-pigmento muestra-{{ f.clave }}"></span>{% endif %}{{ f.nombre }}
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        {% if f.antes is None %}—{% elif f.unidad == '%' %}{{ f.antes|floatformat:2 }} %{% else %}S/ {{ f.antes|floatformat:2 }}{% endif %}
+                                        {% if f.detalle_antes %}<div class="small text-muted">{{ f.detalle_antes }}</div>{% endif %}
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        {% if f.despues is None %}—{% elif f.unidad == '%' %}{{ f.despues|floatformat:2 }} %{% else %}S/ {{ f.despues|floatformat:2 }}{% endif %}
+                                        {% if f.detalle_despues %}<div class="small text-muted">{{ f.detalle_despues }}</div>{% endif %}
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        {% if f.diferencia is None %}
+                                            —
+                                        {% else %}
+                                            {% if f.sube %}+{% elif f.sube is False %}−{% endif %}{% if f.unidad == '%' %}{{ f.diferencia_abs|floatformat:2 }} pp{% else %}S/ {{ f.diferencia_abs|floatformat:2 }}{% endif %}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        {% if f.sube is not None and f.variacion is not None %}
+                                            <span class="kpi-comparacion {% if f.mejora %}mejora{% else %}empeora{% endif %}">
+                                                <i class="bi {% if f.sube %}bi-arrow-up-short{% else %}bi-arrow-down-short{% endif %}"></i>
+                                                {{ f.variacion_abs|floatformat:1 }}%
+                                            </span>
+                                        {% elif f.diferencia is not None and f.sube is None %}
+                                            <span class="kpi-comparacion neutro"><i class="bi bi-dash-lg"></i> Sin cambios</span>
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted small mt-3 mb-0">
+                    pp = puntos porcentuales. Verde = el indicador mejora (EI y NS suben, COI baja).
+                </p>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            {% for titulo, medida in periodos %}
+                <div class="col-lg-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h6 class="card-title"><i class="bi bi-cash-stack me-1"></i> COI {{ titulo }}</h6>
+                            <p class="text-muted small mb-3">
+                                Del {{ medida.inicio|date:'d/m/Y' }} al {{ medida.fin|date:'d/m/Y' }}. COI = CA + PD.
+                            </p>
+                            <table class="table table-sm align-middle mb-0 tabla-compacta">
+                                <tbody>
+                                    {% for c in medida.coi.conceptos_almacenamiento %}
+                                        <tr class="small text-muted">
+                                            <td class="ps-4">{{ c.concepto }}</td>
+                                            <td class="text-end text-nowrap">S/ {{ c.monto|floatformat:2 }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                    <tr>
+                                        <td><strong>CA</strong> — costos de almacenamiento</td>
+                                        <td class="text-end text-nowrap">S/ {{ medida.coi.almacenamiento|floatformat:2 }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <strong>PD</strong> — pérdidas por desabastecimiento
+                                            <div class="small text-muted">
+                                                {{ medida.coi.lineas_desabastecimiento }} línea{{ medida.coi.lineas_desabastecimiento|pluralize }} ·
+                                                {{ medida.coi.unidades_no_atendidas }} unidad{{ medida.coi.unidades_no_atendidas|pluralize:"es" }} ·
+                                                {{ medida.coi.productos_afectados }} producto{{ medida.coi.productos_afectados|pluralize }}
+                                            </div>
+                                        </td>
+                                        <td class="text-end text-nowrap">S/ {{ medida.coi.desabastecimiento|floatformat:2 }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>COI</strong></td>
+                                        <td class="text-end text-nowrap"><strong>S/ {{ medida.coi.valor|floatformat:2 }}</strong></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+        {% endwith %}
+    {% endif %}
+{% endif %}
+{% endblock %}

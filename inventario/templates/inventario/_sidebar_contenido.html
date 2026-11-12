@@ -42,7 +42,32 @@ sistema.
            href="{% url 'inventario:conteo_lista' %}" title="Conteo físico">
             <i class="bi bi-clipboard-check"></i> <span class="etiqueta-colapsable">Conteo físico</span>
         </a>
+        {% if perms.inventario.view_compra %}
+            <a class="nav-link {% if request.resolver_match.url_name in 'compra_lista,compra_nueva,compra_detalle' %}active{% endif %}"
+               href="{% url 'inventario:compra_lista' %}" title="Compras">
+                <i class="bi bi-bag-check"></i> <span class="etiqueta-colapsable">Compras</span>
+            </a>
+        {% endif %}
     </div>
+
+    {% if perms.inventario.view_producto or perms.inventario.view_proveedor %}
+        <div class="sidebar-seccion">
+            <div class="sidebar-seccion-titulo etiqueta-colapsable">Catálogo</div>
+
+            {% if perms.inventario.view_producto %}
+                <a class="nav-link {% if request.resolver_match.url_name in 'producto_lista,producto_nuevo,producto_editar' %}active{% endif %}"
+                   href="{% url 'inventario:producto_lista' %}" title="Productos">
+                    <i class="bi bi-box-seam"></i> <span class="etiqueta-colapsable">Productos</span>
+                </a>
+            {% endif %}
+            {% if perms.inventario.view_proveedor %}
+                <a class="nav-link {% if request.resolver_match.url_name in 'proveedor_lista,proveedor_nuevo,proveedor_editar' %}active{% endif %}"
+                   href="{% url 'inventario:proveedor_lista' %}" title="Proveedores">
+                    <i class="bi bi-truck"></i> <span class="etiqueta-colapsable">Proveedores</span>
+                </a>
+            {% endif %}
+        </div>
+    {% endif %}
 
     {% if perms.inventario.change_anomalia or perms.inventario.change_recomendacion %}
         <div class="sidebar-seccion">
@@ -80,6 +105,10 @@ sistema.
         <a class="nav-link {% if request.resolver_match.url_name == 'reportes' %}active{% endif %}"
            href="{% url 'inventario:reportes' %}" title="Reportes">
             <i class="bi bi-bar-chart-line"></i> <span class="etiqueta-colapsable">Reportes</span>
+        </a>
+        <a class="nav-link {% if request.resolver_match.url_name == 'comparacion' %}active{% endif %}"
+           href="{% url 'inventario:comparacion' %}" title="Pretest y postest">
+            <i class="bi bi-clipboard-data"></i> <span class="etiqueta-colapsable">Pretest y postest</span>
         </a>
     </div>
 </nav>
